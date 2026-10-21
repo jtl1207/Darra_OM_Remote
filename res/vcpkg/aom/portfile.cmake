@@ -31,9 +31,10 @@ else()
 endif()
 
 set(aom_target_cpu "")
-if(VCPKG_TARGET_IS_UWP OR (VCPKG_TARGET_IS_WINDOWS AND VCPKG_TARGET_ARCHITECTURE MATCHES "^arm"))
+if(VCPKG_TARGET_IS_UWP OR (VCPKG_TARGET_IS_WINDOWS AND VCPKG_TARGET_ARCHITECTURE MATCHES "^arm") OR VCPKG_TARGET_IS_ANDROID)
     # UWP + aom's assembler files result in weirdness and build failures
     # Also, disable assembly on ARM and ARM64 Windows to fix compilation issues.
+    # Android 同理: aom 脚手架默认找宿主 `as`, NDK 交叉编译下必炸 → generic 免汇编。
     set(aom_target_cpu "-DAOM_TARGET_CPU=generic")
 endif()
 

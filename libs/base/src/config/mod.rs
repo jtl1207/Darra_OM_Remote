@@ -12,7 +12,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 lazy_static::lazy_static! {
-    pub static ref APP_NAME: RwLock<String> = RwLock::new("DarraOM".to_owned());
+    pub static ref APP_NAME: RwLock<String> = RwLock::new("Darra 远程".to_owned());
     pub static ref ORG: RwLock<String> = RwLock::new("Darra".to_owned());
     /// 移动端/自定义数据根;桌面为空串时走 ProjectDirs。
     pub static ref APP_DIR: RwLock<String> = RwLock::new("".to_owned());
