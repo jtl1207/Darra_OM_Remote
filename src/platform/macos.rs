@@ -1,0 +1,932 @@
+// https://developer.apple.com/documentation/appkit/nscursor
+// https://github.com/servo/core-foundation-rs
+// https://github.com/rust-windowing/winit
+
+use super::{CursorData, ResultType};
+use cocoa::{
+    appkit::{NSApp, NSApplication, NSApplicationActivationPolicy::*},
+    base::{id, nil, BOOL, NO, YES},
+    foundation::{NSDictionary, NSPoint, NSSize, NSString},
+};
+use core_foundation::{
+    array::{CFArrayGetCount, CFArrayGetValueAtIndex},
+    dictionary::CFDictionaryRef,
+    string::CFStringRef,
+};
+use core_graphics::{
+    display::{kCGNullWindowID, kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo},
+    window::{kCGWindowName, kCGWindowOwnerPID},
+};
+use hbb_common::{anyhow::anyhow, bail, config::Config, log};
+use base::message_proto::{DisplayInfo, Resolution};
+use include_dir::{include_dir, Dir};
+use objc::rc::autoreleasepool;
+use objc::{class, msg_send, sel, sel_impl};
+use scrap::{libc::c_void, quartz::ffi::*};
+use std::{
+    path::PathBuf,
+    sync::Mutex,
+};
+
+// macOS boolean_t is defined as `int` in <mach/boolean.h>
+type BooleanT = hbb_common::libc::c_int;
+
+static PRIVILEGES_SCRIPTS_DIR: Dir =
+    include_dir!("$CARGO_MANIFEST_DIR/src/platform/privileges_scripts");
+static mut LATEST_SEED: i32 = 0;
+
+/// Global mutex to serialize CoreGraphics cursor operations.
+/// This prevents race conditions between cursor visibility (hide depth tracking)
+/// and cursor positioning/clipping operations.
+static CG_CURSOR_MUTEX: Mutex<()> = Mutex::new(());
+
+extern "C" {
+    fn CGSCurrentCursorSeed() -> i32;
+    fn CGEventCreate(r: *const c_void) -> *const c_void;
+    fn CGEventGetLocation(e: *const c_void) -> CGPoint;
+    static kAXTrustedCheckOptionPrompt: CFStringRef;
+    fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> BOOL;
+    fn InputMonitoringAuthStatus(_: BOOL) -> BOOL;
+    fn IsCanScreenRecording(_: BOOL) -> BOOL;
+    fn CanUseNewApiForScreenCaptureCheck() -> BOOL;
+    fn MacCheckAdminAuthorization() -> BOOL;
+    fn MacGetModeNum(display: u32, numModes: *mut u32) -> BOOL;
+    fn MacGetModes(
+        display: u32,
+        widths: *mut u32,
+        heights: *mut u32,
+        hidpis: *mut BOOL,
+        max: u32,
+        numModes: *mut u32,
+    ) -> BOOL;
+    fn majorVersion() -> u32;
+    fn MacGetMode(display: u32, width: *mut u32, height: *mut u32) -> BOOL;
+    fn MacSetMode(display: u32, width: u32, height: u32, tryHiDPI: bool) -> BOOL;
+    fn CGWarpMouseCursorPosition(newCursorPosition: CGPoint) -> CGError;
+    fn CGAssociateMouseAndMouseCursorPosition(connected: BooleanT) -> CGError;
+}
+
+pub fn major_version() -> u32 {
+    unsafe { majorVersion() }
+}
+
+pub fn is_process_trusted(prompt: bool) -> bool {
+    autoreleasepool(|| unsafe_is_process_trusted(prompt))
+}
+
+fn unsafe_is_process_trusted(prompt: bool) -> bool {
+    unsafe {
+        let value = if prompt { YES } else { NO };
+        let value: id = msg_send![class!(NSNumber), numberWithBool: value];
+        let options = NSDictionary::dictionaryWithObject_forKey_(
+            nil,
+            value,
+            kAXTrustedCheckOptionPrompt as _,
+        );
+        AXIsProcessTrustedWithOptions(options as _) == YES
+    }
+}
+
+pub fn is_can_input_monitoring(prompt: bool) -> bool {
+    unsafe {
+        let value = if prompt { YES } else { NO };
+        InputMonitoringAuthStatus(value) == YES
+    }
+}
+
+pub fn is_can_screen_recording(prompt: bool) -> bool {
+    autoreleasepool(|| unsafe_is_can_screen_recording(prompt))
+}
+
+// macOS >= 10.15
+// https://stackoverflow.com/questions/56597221/detecting-screen-recording-settings-on-macos-catalina/
+// remove just one app from all the permissions: tccutil reset All com.carriez.rustdesk
+fn unsafe_is_can_screen_recording(prompt: bool) -> bool {
+    // we got some report that we show no permission even after set it, so we try to use new api for screen recording check
+    // the new api is only available on macOS >= 10.15, but on stackoverflow, some people said it works on >= 10.16 (crash on 10.15),
+    // but also some said it has bug on 10.16, so we just use it on 11.0.
+    unsafe {
+        if CanUseNewApiForScreenCaptureCheck() == YES {
+            return IsCanScreenRecording(if prompt { YES } else { NO }) == YES;
+        }
+    }
+    let mut can_record_screen: bool = false;
+    unsafe {
+        let our_pid: i32 = std::process::id() as _;
+        let our_pid: id = msg_send![class!(NSNumber), numberWithInteger: our_pid];
+        let window_list =
+            CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+        let n = CFArrayGetCount(window_list);
+        let dock = NSString::alloc(nil).init_str("Dock");
+        for i in 0..n {
+            let w: id = CFArrayGetValueAtIndex(window_list, i) as _;
+            let name: id = msg_send![w, valueForKey: kCGWindowName as id];
+            if name.is_null() {
+                continue;
+            }
+            let pid: id = msg_send![w, valueForKey: kCGWindowOwnerPID as id];
+            let is_me: BOOL = msg_send![pid, isEqual: our_pid];
+            if is_me == YES {
+                continue;
+            }
+            let pid: i32 = msg_send![pid, intValue];
+            let p: id = msg_send![
+                class!(NSRunningApplication),
+                runningApplicationWithProcessIdentifier: pid
+            ];
+            if p.is_null() {
+                // ignore processes we don't have access to, such as WindowServer, which manages the windows named "Menubar" and "Backstop Menubar"
+                continue;
+            }
+            let url: id = msg_send![p, executableURL];
+            let exe_name: id = msg_send![url, lastPathComponent];
+            if exe_name.is_null() {
+                continue;
+            }
+            let is_dock: BOOL = msg_send![exe_name, isEqual: dock];
+            if is_dock == YES {
+                // ignore the Dock, which provides the desktop picture
+                continue;
+            }
+            can_record_screen = true;
+            break;
+        }
+    }
+    if !can_record_screen && prompt {
+        use scrap::{Capturer, Display};
+        if let Ok(d) = Display::primary() {
+            Capturer::new(d).ok();
+        }
+    }
+    can_record_screen
+}
+
+pub fn install_service() -> bool {
+    is_installed_daemon(false)
+}
+
+// is_installed_daemon 与卸载脚本里的 plist 命名保持一致，改动其一必须同步另一处。
+pub fn is_installed_daemon(prompt: bool) -> bool {
+    let daemon = format!("{}_service.plist", crate::get_full_name());
+    let agent = format!("{}_server.plist", crate::get_full_name());
+    let agent_plist_file = format!("/Library/LaunchAgents/{}", agent);
+    if !prompt {
+        // in macos 13, there is new way to check if they are running or enabled, https://developer.apple.com/documentation/servicemanagement/updating-helper-executables-from-earlier-versions-of-macos#Respond-to-changes-in-System-Settings
+        if !std::path::Path::new(&format!("/Library/LaunchDaemons/{}", daemon)).exists() {
+            return false;
+        }
+        if !std::path::Path::new(&agent_plist_file).exists() {
+            return false;
+        }
+        return true;
+    }
+
+    let Some(install_script) = PRIVILEGES_SCRIPTS_DIR.get_file("install.scpt") else {
+        return false;
+    };
+    let Some(install_script_body) = install_script.contents_utf8().map(correct_app_name) else {
+        return false;
+    };
+
+    let Some(daemon_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("daemon.plist") else {
+        return false;
+    };
+    let Some(daemon_plist_body) = daemon_plist.contents_utf8().map(correct_app_name) else {
+        return false;
+    };
+
+    let Some(agent_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("agent.plist") else {
+        return false;
+    };
+    let Some(agent_plist_body) = agent_plist.contents_utf8().map(correct_app_name) else {
+        return false;
+    };
+
+    std::thread::spawn(move || {
+        match std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(install_script_body)
+            .arg(daemon_plist_body)
+            .arg(agent_plist_body)
+            .arg(&get_active_username())
+            .status()
+        {
+            Err(e) => {
+                log::error!("run osascript failed: {}", e);
+            }
+            _ => {
+                let installed = std::path::Path::new(&agent_plist_file).exists();
+                log::info!("Agent file {} installed: {}", agent_plist_file, installed);
+                if installed {
+                    log::info!("launch server");
+                    std::process::Command::new("launchctl")
+                        .args(&["load", "-w", &agent_plist_file])
+                        .status()
+                        .ok();
+                }
+            }
+        }
+    });
+    false
+}
+
+fn correct_app_name(s: &str) -> String {
+    let mut s = s.to_owned();
+    if let Some(bundleid) = get_bundle_id() {
+        s = s.replace("com.carriez.rustdesk", &bundleid);
+    }
+    s = s.replace("rustdesk", &crate::get_app_name().to_lowercase());
+    s = s.replace("RustDesk", &crate::get_app_name());
+    s
+}
+
+fn write_plist_atomically(path: &str, body: &str) -> ResultType<()> {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = format!("{}.tmp.{}", path, std::process::id());
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o644))?;
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        Ok::<(), std::io::Error>(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(Into::into)
+}
+
+pub fn write_plists() -> ResultType<()> {
+    let daemon_plist_path = format!(
+        "/Library/LaunchDaemons/com.carriez.{}_service.plist",
+        crate::get_app_name()
+    );
+    let agent_plist_path = format!(
+        "/Library/LaunchAgents/com.carriez.{}_server.plist",
+        crate::get_app_name()
+    );
+    let Some(daemon_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("daemon.plist") else {
+        bail!("daemon.plist not found in embedded resources");
+    };
+    let Some(daemon_plist_body) = daemon_plist.contents_utf8().map(correct_app_name) else {
+        bail!("Failed to read daemon.plist");
+    };
+    let Some(agent_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("agent.plist") else {
+        bail!("agent.plist not found in embedded resources");
+    };
+    let Some(agent_plist_body) = agent_plist.contents_utf8().map(correct_app_name) else {
+        bail!("Failed to read agent.plist");
+    };
+    write_plist_atomically(&daemon_plist_path, &daemon_plist_body)?;
+    write_plist_atomically(&agent_plist_path, &agent_plist_body)?;
+    log::info!("[write-plists] Wrote daemon and agent plists");
+    Ok(())
+}
+
+pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
+    // to-do: do together with win/linux about refactory start/stop service
+    if !is_installed_daemon(false) {
+        return false;
+    }
+
+    let Some(script_file) = PRIVILEGES_SCRIPTS_DIR.get_file("uninstall.scpt") else {
+        return false;
+    };
+    let Some(script_body) = script_file.contents_utf8().map(correct_app_name) else {
+        return false;
+    };
+
+    let func = move || {
+        match std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(script_body)
+            .status()
+        {
+            Err(e) => {
+                log::error!("run osascript failed: {}", e);
+            }
+            _ => {
+                let agent = format!("{}_server.plist", crate::get_full_name());
+                let agent_plist_file = format!("/Library/LaunchAgents/{}", agent);
+                let uninstalled = !std::path::Path::new(&agent_plist_file).exists();
+                log::info!(
+                    "Agent file {} uninstalled: {}",
+                    agent_plist_file,
+                    uninstalled
+                );
+                if uninstalled {
+                    Config::set_option("stop-service".into(), "Y".into());
+                    std::process::Command::new("launchctl")
+                        .args(&["remove", &format!("{}_server", crate::get_full_name())])
+                        .status()
+                        .ok();
+                    if show_new_window {
+                        std::process::Command::new("open")
+                            .arg("-n")
+                            .arg(&format!("/Applications/{}.app", crate::get_app_name()))
+                            .spawn()
+                            .ok();
+                        // leave open a little time
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                    }
+                    quit_gui();
+                }
+            }
+        }
+    };
+    if sync {
+        func();
+    } else {
+        std::thread::spawn(func);
+    }
+    true
+}
+
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    unsafe {
+        let e = CGEventCreate(0 as _);
+        let point = CGEventGetLocation(e);
+        CFRelease(e);
+        Some((point.x as _, point.y as _))
+    }
+    /*
+    let mut pt: NSPoint = unsafe { msg_send![class!(NSEvent), mouseLocation] };
+    let screen: id = unsafe { msg_send![class!(NSScreen), currentScreenForMouseLocation] };
+    let frame: NSRect = unsafe { msg_send![screen, frame] };
+    pt.x -= frame.origin.x;
+    pt.y -= frame.origin.y;
+    Some((pt.x as _, pt.y as _))
+    */
+}
+
+/// Warp the mouse cursor to the specified screen position.
+///
+/// # Thread Safety
+/// This function affects global cursor state and acquires `CG_CURSOR_MUTEX`.
+/// Callers must ensure no nested calls occur while the mutex is held.
+///
+/// # Arguments
+/// * `x` - X coordinate in screen points (macOS uses points, not pixels)
+/// * `y` - Y coordinate in screen points
+pub fn set_cursor_pos(x: i32, y: i32) -> bool {
+    // Acquire lock with deadlock detection in debug builds.
+    // In debug builds, try_lock detects re-entrant calls early; on failure we return immediately.
+    // In release builds, we use blocking lock() which will wait if contended.
+    #[cfg(debug_assertions)]
+    let _guard = match CG_CURSOR_MUTEX.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            log::error!(
+                "[BUG] set_cursor_pos: CG_CURSOR_MUTEX is already held - potential deadlock!"
+            );
+            debug_assert!(false, "Re-entrant call to set_cursor_pos detected");
+            return false;
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+    };
+    #[cfg(not(debug_assertions))]
+    let _guard = CG_CURSOR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe {
+        let result = CGWarpMouseCursorPosition(CGPoint {
+            x: x as f64,
+            y: y as f64,
+        });
+        if result != CGError::Success {
+            log::error!(
+                "CGWarpMouseCursorPosition({}, {}) returned error: {:?}",
+                x,
+                y,
+                result
+            );
+        }
+        result == CGError::Success
+    }
+}
+
+/// Toggle pointer lock (dissociate/associate mouse from cursor position).
+///
+/// On macOS, cursor clipping is not supported directly like Windows ClipCursor.
+/// Instead, we use CGAssociateMouseAndMouseCursorPosition to dissociate mouse
+/// movement from cursor position, achieving a "pointer lock" effect.
+///
+/// # Thread Safety
+/// This function affects global cursor state and acquires `CG_CURSOR_MUTEX`.
+/// Callers must ensure only one owner toggles pointer lock at a time;
+/// nested Some/None transitions from different call sites may cause unexpected behavior.
+///
+/// # Arguments
+/// * `rect` - When `Some(_)`, dissociates mouse from cursor (enables pointer lock).
+///            When `None`, re-associates mouse with cursor (disables pointer lock).
+///            The rect coordinate values are ignored on macOS; only `Some`/`None` matters.
+///            The parameter signature matches Windows for API consistency.
+pub fn clip_cursor(rect: Option<(i32, i32, i32, i32)>) -> bool {
+    // Acquire lock with deadlock detection in debug builds.
+    // In debug builds, try_lock detects re-entrant calls early; on failure we return immediately.
+    // In release builds, we use blocking lock() which will wait if contended.
+    #[cfg(debug_assertions)]
+    let _guard = match CG_CURSOR_MUTEX.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            log::error!("[BUG] clip_cursor: CG_CURSOR_MUTEX is already held - potential deadlock!");
+            debug_assert!(false, "Re-entrant call to clip_cursor detected");
+            return false;
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+    };
+    #[cfg(not(debug_assertions))]
+    let _guard = CG_CURSOR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    // CGAssociateMouseAndMouseCursorPosition takes a boolean_t:
+    //   1 (true)  = associate mouse with cursor position (normal mode)
+    //   0 (false) = dissociate mouse from cursor position (pointer lock mode)
+    // When rect is Some, we want pointer lock (dissociate), so associate = false (0).
+    // When rect is None, we want normal mode (associate), so associate = true (1).
+    let associate: BooleanT = if rect.is_some() { 0 } else { 1 };
+    unsafe {
+        let result = CGAssociateMouseAndMouseCursorPosition(associate);
+        if result != CGError::Success {
+            log::warn!(
+                "CGAssociateMouseAndMouseCursorPosition({}) returned error: {:?}",
+                associate,
+                result
+            );
+        }
+        result == CGError::Success
+    }
+}
+
+pub fn get_focused_display(displays: Vec<DisplayInfo>) -> Option<usize> {
+    autoreleasepool(|| unsafe_get_focused_display(displays))
+}
+
+fn unsafe_get_focused_display(displays: Vec<DisplayInfo>) -> Option<usize> {
+    unsafe {
+        let main_screen: id = msg_send![class!(NSScreen), mainScreen];
+        let screen: id = msg_send![main_screen, deviceDescription];
+        let id: id =
+            msg_send![screen, objectForKey: NSString::alloc(nil).init_str("NSScreenNumber")];
+        let display_name: u32 = msg_send![id, unsignedIntValue];
+
+        displays
+            .iter()
+            .position(|d| d.name == display_name.to_string())
+    }
+}
+
+pub fn get_cursor() -> ResultType<Option<u64>> {
+    autoreleasepool(|| unsafe_get_cursor())
+}
+
+// The seed names a change of cursor, not a cursor: the shape is named by its content once
+// captured, as on every platform. A fingerprint of its size, hotspot and two pixels named the open
+// and the closed hand alike, and the arrows with a badge, so a switch between them went unsent.
+fn unsafe_get_cursor() -> ResultType<Option<u64>> {
+    unsafe {
+        let seed = CGSCurrentCursorSeed();
+        if seed == LATEST_SEED {
+            return Ok(None);
+        }
+        LATEST_SEED = seed;
+        Ok(Some(seed as u32 as u64))
+    }
+}
+
+pub fn reset_input_cache() {
+    unsafe {
+        LATEST_SEED = 0;
+    }
+}
+
+pub fn get_cursor_data(hcursor: u64) -> ResultType<CursorData> {
+    autoreleasepool(|| unsafe_get_cursor_data(hcursor))
+}
+
+// https://github.com/stweil/OSXvnc/blob/master/OSXvnc-server/mousecursor.c
+fn unsafe_get_cursor_data(hcursor: u64) -> ResultType<CursorData> {
+    unsafe {
+        // The cursor shown is captured even if it changed after get_cursor read the seed: the
+        // content names the shape, and that change moved the seed on, so the next poll captures it.
+        let c: id = msg_send![class!(NSCursor), currentSystemCursor];
+        if c == nil {
+            bail!("Failed to call [NSCursor currentSystemCursor]");
+        }
+        let hotspot: NSPoint = msg_send![c, hotSpot];
+        let img: id = msg_send![c, image];
+        let size: NSSize = msg_send![img, size];
+        let reps: id = msg_send![img, representations];
+        if reps == nil {
+            bail!("Failed to call [NSImage representations]");
+        }
+        let nreps: usize = msg_send![reps, count];
+        if nreps == 0 {
+            bail!("Get empty [NSImage representations]");
+        }
+        let rep: id = msg_send![reps, objectAtIndex: 0];
+        /*
+        let n: id = msg_send![class!(NSNumber), numberWithFloat:1.0];
+        let props: id = msg_send![class!(NSDictionary), dictionaryWithObject:n forKey:NSString::alloc(nil).init_str("NSImageCompressionFactor")];
+        let image_data: id = msg_send![rep, representationUsingType:2 properties:props];
+        let () = msg_send![image_data, writeToFile:NSString::alloc(nil).init_str("cursor.jpg") atomically:0];
+        */
+        let mut colors: Vec<u8> = Vec::new();
+        colors.reserve((size.height * size.width) as usize * 4);
+        // TIFF is rgb colorspace, no need to convert
+        // let cs: id = msg_send![class!(NSColorSpace), sRGBColorSpace];
+        for y in 0..(size.height as _) {
+            for x in 0..(size.width as _) {
+                let color: id = msg_send![rep, colorAtX:x as cocoa::foundation::NSInteger y:y as cocoa::foundation::NSInteger];
+                // let color: id = msg_send![color, colorUsingColorSpace: cs];
+                if color == nil {
+                    continue;
+                }
+                let r: f64 = msg_send![color, redComponent];
+                let g: f64 = msg_send![color, greenComponent];
+                let b: f64 = msg_send![color, blueComponent];
+                let a: f64 = msg_send![color, alphaComponent];
+                colors.push((r * 255.) as _);
+                colors.push((g * 255.) as _);
+                colors.push((b * 255.) as _);
+                colors.push((a * 255.) as _);
+            }
+        }
+        Ok(CursorData {
+            id: hcursor,
+            colors: colors.into(),
+            hotx: hotspot.x as _,
+            hoty: hotspot.y as _,
+            width: size.width as _,
+            height: size.height as _,
+            ..Default::default()
+        })
+    }
+}
+
+fn get_active_user(t: &str) -> String {
+    if let Ok(output) = std::process::Command::new("ls")
+        .args(vec![t, "/dev/console"])
+        .output()
+    {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Some(n) = line.split_whitespace().nth(2) {
+                return n.to_owned();
+            }
+        }
+    }
+    "".to_owned()
+}
+
+pub fn get_active_username() -> String {
+    get_active_user("-l")
+}
+
+pub fn get_active_userid() -> String {
+    get_active_user("-n")
+}
+
+/// Return every UID with a login-window/session entry. Fast user switching
+/// can leave several GUI bootstrap domains alive at once, so updating only
+/// the console user can leave another user's agent on the old bundle.
+pub(crate) fn get_logged_in_uids() -> Vec<u32> {
+    let mut uids = std::collections::BTreeSet::new();
+    if let Ok(output) = std::process::Command::new("/usr/bin/who").output() {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let Some(username) = line.split_whitespace().next() else {
+                continue;
+            };
+            let Ok(output) = std::process::Command::new("/usr/bin/id")
+                .args(["-u", username])
+                .output()
+            else {
+                continue;
+            };
+            let Ok(uid) = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u32>()
+            else {
+                continue;
+            };
+            let gui_domain = format!("gui/{}", uid);
+            if std::process::Command::new("/bin/launchctl")
+                .args(["print", &gui_domain])
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                uids.insert(uid);
+            }
+        }
+    }
+    if let Ok(active_uid) = get_active_userid().parse::<u32>() {
+        if active_uid == 0 {
+            // UID 0 owns /dev/console while the LoginWindow session is active.
+            // Query that server even when fast-switched GUI domains also exist.
+            uids.insert(0);
+        } else {
+            let gui_domain = format!("gui/{}", active_uid);
+            if std::process::Command::new("/bin/launchctl")
+                .args(["print", &gui_domain])
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                uids.insert(active_uid);
+            }
+        }
+    }
+    if uids.is_empty() {
+        // The login window has no ordinary gui/0 bootstrap domain.
+        uids.insert(0);
+    }
+    uids.into_iter().collect()
+}
+
+pub fn get_active_user_home() -> Option<PathBuf> {
+    let username = get_active_username();
+    if !username.is_empty() {
+        let home = PathBuf::from(format!("/Users/{}", username));
+        if home.exists() {
+            return Some(home);
+        }
+    }
+    None
+}
+
+pub fn is_prelogin() -> bool {
+    get_active_userid() == "0"
+}
+
+// https://stackoverflow.com/questions/11505255/osx-check-if-the-screen-is-locked
+// No "CGSSessionScreenIsLocked" can be found when macOS is not locked.
+//
+// `ioreg -n Root -d1` returns `"CGSSessionScreenIsLocked"=Yes`
+// `ioreg -n Root -d1 -a` returns
+// ```
+// ...
+//    <key>CGSSessionScreenIsLocked</key>
+//    <true/>
+// ...
+// ```
+pub fn is_locked() -> bool {
+    match std::process::Command::new("ioreg")
+        .arg("-n")
+        .arg("Root")
+        .arg("-d1")
+        .output()
+    {
+        Ok(output) => {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            // Although `"CGSSessionScreenIsLocked"=Yes` was printed on my macOS,
+            // I also check `"CGSSessionScreenIsLocked"=true` for better compability.
+            output_str.contains("\"CGSSessionScreenIsLocked\"=Yes")
+                || output_str.contains("\"CGSSessionScreenIsLocked\"=true")
+        }
+        Err(e) => {
+            log::error!("Failed to query ioreg for the lock state: {}", e);
+            false
+        }
+    }
+}
+
+pub fn is_logon_screen() -> bool {
+    is_prelogin() || is_locked()
+}
+
+pub fn is_root() -> bool {
+    crate::username() == "root"
+}
+
+pub fn run_as_user(arg: Vec<&str>) -> ResultType<Option<std::process::Child>> {
+    let uid = get_active_userid();
+    let cmd = std::env::current_exe()?;
+    let mut args = vec!["asuser", &uid, cmd.to_str().unwrap_or("")];
+    args.append(&mut arg.clone());
+    let task = std::process::Command::new("launchctl").args(args).spawn()?;
+    Ok(Some(task))
+}
+
+pub fn lock_screen() {
+    std::process::Command::new(
+        "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
+    )
+    .arg("-suspend")
+    .output()
+    .ok();
+}
+
+/// macOS 系统服务入口。
+pub fn start_os_service() {
+    log::info!("Username: {}", crate::username());
+}
+
+pub fn toggle_blank_screen(_v: bool) {
+    // https://unix.stackexchange.com/questions/17115/disable-keyboard-mouse-temporarily
+}
+
+pub fn block_input(_v: bool) -> (bool, String) {
+    (true, "".to_owned())
+}
+
+pub fn is_installed() -> bool {
+    if let Ok(p) = std::env::current_exe() {
+        return p
+            .to_str()
+            .unwrap_or_default()
+            .starts_with(&format!("/Applications/{}.app", crate::get_app_name()));
+    }
+    false
+}
+
+pub fn quit_gui() {
+    unsafe {
+        let () = msg_send!(NSApp(), terminate: nil);
+    };
+}
+
+pub fn get_double_click_time() -> u32 {
+    // to-do: https://github.com/servo/core-foundation-rs/blob/786895643140fa0ee4f913d7b4aeb0c4626b2085/cocoa/src/appkit.rs#L2823
+    500 as _
+}
+
+pub fn hide_dock() {
+    unsafe {
+        NSApp().setActivationPolicy_(NSApplicationActivationPolicyAccessory);
+    }
+}
+
+pub fn handle_application_should_open_untitled_file() {
+    hbb_common::log::debug!("icon clicked on finder");
+}
+
+/// Get all resolutions of the display. The resolutions are:
+/// 1. Sorted by width and height in descending order, with duplicates removed.
+/// 2. Filtered out if the width is less than 800 (800x600) if there are too many (e.g., >15).
+/// 3. Contain HiDPI resolutions and the real resolutions.
+///
+/// We don't need to distinguish between HiDPI and real resolutions.
+/// When the controlling side changes the resolution, it will call `change_resolution_directly()`.
+/// `change_resolution_directly()` will try to use the HiDPI resolution first.
+/// This is how teamviewer does it for now.
+///
+/// If we need to distinguish HiDPI and real resolutions, we can add a flag to the `Resolution` struct.
+pub fn resolutions(name: &str) -> Vec<Resolution> {
+    let mut v = vec![];
+    if let Ok(display) = name.parse::<u32>() {
+        let mut num = 0;
+        unsafe {
+            if YES == MacGetModeNum(display, &mut num) {
+                let (mut widths, mut heights, mut _hidpis) =
+                    (vec![0; num as _], vec![0; num as _], vec![NO; num as _]);
+                let mut real_num = 0;
+                if YES
+                    == MacGetModes(
+                        display,
+                        widths.as_mut_ptr(),
+                        heights.as_mut_ptr(),
+                        _hidpis.as_mut_ptr(),
+                        num,
+                        &mut real_num,
+                    )
+                {
+                    if real_num <= num {
+                        v = (0..real_num)
+                            .map(|i| Resolution {
+                                width: widths[i as usize] as _,
+                                height: heights[i as usize] as _,
+                                ..Default::default()
+                            })
+                            .collect::<Vec<_>>();
+                        // Sort by (w, h), desc
+                        v.sort_by(|a, b| {
+                            if a.width == b.width {
+                                b.height.cmp(&a.height)
+                            } else {
+                                b.width.cmp(&a.width)
+                            }
+                        });
+                        // Remove duplicates
+                        v.dedup_by(|a, b| a.width == b.width && a.height == b.height);
+                        // Filter out the ones that are less than width 800 (800x600) if there are too many.
+                        // We can also do this filtering on the client side, but it is better not to change the client side to reduce the impact.
+                        if v.len() > 15 {
+                            // Most width > 800, so it's ok to remove the small ones.
+                            v.retain(|r| r.width >= 800);
+                        }
+                        if v.len() > 15 {
+                            // Ignore if the length is still too long.
+                        }
+                    }
+                }
+            }
+        }
+    }
+    v
+}
+
+pub fn current_resolution(name: &str) -> ResultType<Resolution> {
+    let display = name.parse::<u32>().map_err(|e| anyhow!(e))?;
+    unsafe {
+        let (mut width, mut height) = (0, 0);
+        if NO == MacGetMode(display, &mut width, &mut height) {
+            bail!("MacGetMode failed");
+        }
+        Ok(Resolution {
+            width: width as _,
+            height: height as _,
+            ..Default::default()
+        })
+    }
+}
+
+pub fn change_resolution_directly(name: &str, width: usize, height: usize) -> ResultType<()> {
+    let display = name.parse::<u32>().map_err(|e| anyhow!(e))?;
+    unsafe {
+        if NO == MacSetMode(display, width as _, height as _, true) {
+            bail!("MacSetMode failed");
+        }
+    }
+    Ok(())
+}
+
+pub fn check_super_user_permission() -> ResultType<bool> {
+    unsafe { Ok(MacCheckAdminAuthorization() == YES) }
+}
+
+pub fn elevate(args: Vec<&str>, prompt: &str) -> ResultType<bool> {
+    let cmd = std::env::current_exe()?;
+    match cmd.to_str() {
+        Some(cmd) => {
+            let mut cmd_with_args = cmd.to_string();
+            for arg in args {
+                cmd_with_args = format!("{} {}", cmd_with_args, arg);
+            }
+            let script = format!(
+                r#"do shell script "{}" with prompt "{}" with administrator privileges"#,
+                cmd_with_args, prompt
+            );
+            match std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(script)
+                .arg(&get_active_username())
+                .status()
+            {
+                Err(e) => {
+                    bail!("Failed to run osascript: {}", e);
+                }
+                Ok(status) => Ok(status.success() && status.code() == Some(0)),
+            }
+        }
+        None => {
+            bail!("Failed to get current exe str");
+        }
+    }
+}
+
+pub struct WakeLock(Option<keepawake::AwakeHandle>);
+
+impl WakeLock {
+    pub fn new(display: bool, idle: bool, sleep: bool) -> Self {
+        WakeLock(
+            keepawake::Builder::new()
+                .display(display)
+                .idle(idle)
+                .sleep(sleep)
+                .create()
+                .ok(),
+        )
+    }
+
+    pub fn set_display(&mut self, display: bool) -> ResultType<()> {
+        self.0
+            .as_mut()
+            .map(|h| h.set_display(display))
+            .ok_or(anyhow!("no AwakeHandle"))?
+    }
+}
+
+pub(crate) fn get_bundle_id() -> Option<String> {
+    unsafe {
+        let bundle: id = msg_send![class!(NSBundle), mainBundle];
+        if bundle.is_null() {
+            return None;
+        }
+
+        let bundle_id: id = msg_send![bundle, bundleIdentifier];
+        if bundle_id.is_null() {
+            return None;
+        }
+
+        let c_str: *const std::os::raw::c_char = msg_send![bundle_id, UTF8String];
+        if c_str.is_null() {
+            return None;
+        }
+
+        let bundle_id_str = std::ffi::CStr::from_ptr(c_str)
+            .to_string_lossy()
+            .to_string();
+        Some(bundle_id_str)
+    }
+}
+

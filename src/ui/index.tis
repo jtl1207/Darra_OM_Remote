@@ -1,0 +1,232 @@
+if (is_osx) view.windowBlurbehind = #light;
+stdout.println("current platform:", OS);
+stdout.println("is_xfce: ", is_xfce);
+
+// See default height in common.tis `msgbox()`.
+const is_custom_client = handler.is_custom_client();
+
+// html min-width, min-height not working on mac, below works for all
+view.windowMinSize = (scaleIt(560), scaleIt(300));
+
+var app;
+const default_option_lang = is_custom_client ? 'default' : '';
+const default_option_no = is_custom_client ? 'N' : '';
+
+var svg_menu = <svg #menu viewBox="0 0 512 512">
+	<circle cx="256" cy="256" r="64"/>
+	<circle cx="256" cy="448" r="64"/>
+	<circle cx="256" cy="64" r="64"/>
+</svg>;
+function get_msgbox_width(width=500) {
+    return width;
+}
+
+class Languages: Reactor.Component {
+    function render() {
+        var langs = JSON.parse(handler.get_langs());
+        var me = this;
+        self.timer(1ms, function() { me.toggleMenuState() });
+        return <li>{translate('Language')}
+            <menu #languages key={langs.length}>
+                <li id="default"><span>{svg_checkmark}</span>Default</li>
+                <div .separator />
+                {langs.map(function(lang) {
+                return <li id={lang[0]}><span>{svg_checkmark}</span>{lang[1]}</li>;
+                })}
+            </menu>
+        </li>;
+    }
+
+
+    function toggleMenuState() {
+        var cur = handler.get_local_option("lang") || "default";
+        var is_opt_fixed = handler.is_option_fixed("lang");
+        for (var el in this.$$(menu#languages>li)) {
+            var selected = cur == el.id;
+            el.attributes.toggleClass("selected", selected);
+            if (is_opt_fixed) {
+                el.state.disabled = true;
+            }
+        }
+    }
+
+    event click $(menu#languages>li) (_, me) {
+        if (me.state.disabled) return;
+        var v = me.id;
+        if (v == "default") v = default_option_lang;
+        handler.set_local_option("lang", v);
+        app.update();
+        this.toggleMenuState();
+    }
+}
+
+function updateTheme() {
+    var root_element = self;
+    if (handler.get_option("allow-darktheme") == "Y") {
+        // enable dark theme
+        root_element.attributes.toggleClass("darktheme", true);
+    } else {
+        // disable dark theme
+        root_element.attributes.toggleClass("darktheme", false);
+    }
+}
+
+class MyIdMenu: Reactor.Component {
+    function this() {
+        myIdMenu = this;
+    }
+
+    function render() {
+        return <div #myid>
+            {this.renderPop()}
+            {translate('Settings')}{svg_menu}
+        </div>;
+    }
+
+    function renderPop() {
+        return <popup>
+            <menu.context #config-options>
+                <li #allow-darktheme><span>{svg_checkmark}</span>{translate('Dark Theme')}</li>
+                <Languages />
+                <li #about>{translate('About')} {" "}{handler.get_app_name()}</li>
+            </menu>
+        </popup>;
+    }
+
+    event click $(svg#menu) (_, me) {
+        this.showSettingMenu();
+    }
+
+    function showSettingMenu() {
+        this.toggleMenuState();
+        var menu = this.$(menu#config-options);
+        this.$(svg#menu).popup(menu);
+    }
+
+    function toggleMenuState() {
+        for (var el in $$(menu#config-options>li)) {
+            var id = el.id;
+            if (!id) continue;
+            var is_opt_fixed = handler.is_option_fixed(id);
+            if (id.indexOf("enable-") == 0) {
+                var enabled = handler.get_option(id) != "N";
+                el.attributes.toggleClass("selected", enabled);
+                el.attributes.toggleClass("line-through", !enabled);
+            } else if (id.indexOf("allow-") == 0) {
+                var enabled = handler.get_option(id) == "Y";
+                el.attributes.toggleClass("selected", enabled);
+                el.attributes.toggleClass("line-through", !enabled);
+            }
+            if (is_opt_fixed) {
+                el.state.disabled = true;
+            }
+        }
+    }
+
+    function showAbout() {
+        var name = handler.get_app_name();
+        msgbox("custom-nocancel-nook-hasclose", translate("About") + " " + name, "<div style='line-height: 2em'> \
+            <div>Version: " + handler.get_version() + " \
+            <div .link .custom-event url='https://rustdesk.com/privacy.html'>" + translate("Privacy Statement") + "</div> \
+            <div .link .custom-event url='https://rustdesk.com'>" + translate("Website") + "</div> \
+	    <div style='background: #2c8cff; color: white; padding: 1em; margin-top: 1em;'>Copyright &copy; 2026 Purslane Tech Pte. Ltd.\
+            <p style='font-weight: bold'>" + translate("Slogan_tip") + "</p>\
+            </div>\
+        </div>", "", function(el) {
+            if (el && el.attributes) {
+                handler.open_url(el.attributes['url']);
+            };
+        }, 400, get_msgbox_width());
+    }
+
+    event click $(menu#config-options>li) (_, me) {
+        if (me.state.disabled) return;
+        if (me.id && me.id.indexOf("allow-") == 0) {
+            handler.set_option(me.id, handler.get_option(me.id) == "Y" ? default_option_no : "Y");
+        }
+        if (me.id == "allow-darktheme") {
+            updateTheme();
+        } else if (me.id == "about") {
+            this.showAbout()
+        }
+    }
+}
+
+
+class App: Reactor.Component
+{
+    function this() {
+        app = this;
+    }
+
+    function render() {
+        return
+            <div .app>
+                    <div .left-pane>
+                    <div>
+                        {is_custom_client && handler.get_builtin_option("hide-powered-by-me") != "Y" ? <div .link #powered-by style="opacity:0.5;font-size:0.8em;text-decoration:underline">{translate('powered_by_me')}</div> : ""}
+                        <div .title style="flow:horizontal; position:relative; height:1.6em; line-height:1.6em">
+                            <span>{translate('Your Desktop')}</span>
+                        </div>
+                        <div .lighter-text>{translate('desk_tip')}</div>
+                        <div .your-desktop>
+                            <MyIdMenu />
+                        </div>
+                    </div>
+                </div>
+                <div .right-pane>
+                    <div .right-content>
+                        <MultipleSessions @{this.multipleSessions} />
+                    </div>
+                </div>
+                <div #overlay style="position: absolute;size:*;background:black;opacity:0.5;display:none" />
+            </div>;
+    }
+}
+
+
+
+
+
+
+$(body).content(<div style="size:*"><App /><div #msgbox /></div>);
+
+event click $(#powered-by) {
+    handler.open_url("https://rustdesk.com");
+}
+
+function self.closing() {
+    var (x, y, w, h) = view.box(#rectw, #border, #screen);
+    handler.closing(x, y, w, h);
+    return true;
+}
+
+function self.ready() {
+    var r = handler.get_size();
+    if (isReasonableSize(r) && r[2] > 0) {
+        var (sx, sy, sw, sh) = view.screenBox(#workarea, #rectw);
+        if (r[2] >= sw && r[3] >= sh) {
+            self.timer(1ms, function() { view.windowState = View.WINDOW_MAXIMIZED; });
+        } else {
+            view.move(r[0], r[1], r[2], r[3]);
+        }
+    } else {
+        centerize(scaleIt(800), scaleIt(600));
+    }
+    updateTheme();
+}
+
+function showAbout() {
+    myIdMenu.showAbout();
+}
+
+function showSettings() {
+    if ($(#overlay).style#display == 'block') return;
+    var menu = myIdMenu.$(menu#config-options);
+    // 先立即弹出菜单，再异步刷新勾选状态
+    myIdMenu.$(svg#menu).popup(menu);
+    self.timer(1ms, function() {
+        myIdMenu.toggleMenuState();
+    });
+}
+
