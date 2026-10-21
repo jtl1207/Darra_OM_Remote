@@ -29,9 +29,9 @@ use base::message_proto::CursorData;
     not(all(target_os = "windows", not(target_pointer_width = "64"))),
     not(any(target_os = "android", target_os = "ios"))
 ))]
-use hbb_common::sysinfo::System;
+use base::sysinfo::System;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use hbb_common::{sysinfo::Pid, ResultType};
+use base::{sysinfo::Pid, ResultType};
 use std::sync::{Arc, Mutex};
 
 // Restrict names because installers interpolate them into privileged scripts and paths.
@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 fn validate_install_app_name(app_name: &str) -> ResultType<()> {
     let mut bytes = app_name.bytes();
     let Some(first) = bytes.next() else {
-        hbb_common::bail!("Application name must not be empty.");
+        base::bail!("Application name must not be empty.");
     };
     // Keep leading hyphens valid on Windows for existing custom clients. macOS
     // rejects them because pgrep interprets a leading hyphen as an option.
@@ -53,7 +53,7 @@ fn validate_install_app_name(app_name: &str) -> ResultType<()> {
         } else {
             "a letter, number, or underscore"
         };
-        hbb_common::bail!(
+        base::bail!(
             "Application name must start with {valid_prefix} and contain only letters, numbers, hyphens, and underscores."
         );
     }
@@ -62,6 +62,9 @@ fn validate_install_app_name(app_name: &str) -> ResultType<()> {
 
 #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "ios")))]
 pub const SERVICE_INTERVAL: u64 = 300;
+
+/// 进程崩溃收口回调(Release 注册): 键码重映射随输入服务移除,无本地按键需释放。
+pub fn breakdown_callback() {}
 
 lazy_static::lazy_static! {
     static ref INSTALLING_SERVICE: Arc<Mutex<bool>>= Default::default();
@@ -95,7 +98,7 @@ pub fn change_resolution(name: &str, width: usize, height: usize) -> ResultType<
     if cur_resolution.width as usize == width && cur_resolution.height as usize == height {
         return Ok(());
     }
-    hbb_common::log::warn!("Change resolution of '{}' to ({},{})", name, width, height);
+    base::log::warn!("Change resolution of '{}' to ({},{})", name, width, height);
     change_resolution_directly(name, width, height)
 }
 
@@ -117,7 +120,7 @@ impl WakeLock {
         match android_wakelock::partial(tag) {
             Ok(lock) => Self(Some(lock)),
             Err(e) => {
-                hbb_common::log::error!("Failed to get wakelock: {e:?}");
+                base::log::error!("Failed to get wakelock: {e:?}");
                 Self::default()
             }
         }
@@ -126,7 +129,7 @@ impl WakeLock {
 
 #[cfg(not(target_os = "ios"))]
 pub fn get_wakelock(_display: bool) -> WakeLock {
-    hbb_common::log::info!("new wakelock, require display on: {_display}");
+    base::log::info!("new wakelock, require display on: {_display}");
     #[cfg(target_os = "android")]
     return crate::platform::WakeLock::new("server");
     // display: keep screen on

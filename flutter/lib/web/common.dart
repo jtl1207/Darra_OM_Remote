@@ -16,3 +16,9 @@ final _localOs = js.context.callMethod('getByName', ['local_os', '']);
 final isWebOnWindows_ = _localOs == kPeerPlatformWindows;
 final isWebOnLinux_ = _localOs == kPeerPlatformLinux;
 final isWebOnMacOS_ = _localOs == kPeerPlatformMacOS;
+
+/// web 无本机进程能力,SessionHost 拉起仅桌面原生支持。
+Future<bool> launchSessionHost(String uid,
+    {String kind = 'remote', String? name, String? token}) async {
+  return false;
+}

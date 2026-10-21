@@ -17,7 +17,7 @@ use core_graphics::{
     display::{kCGNullWindowID, kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo},
     window::{kCGWindowName, kCGWindowOwnerPID},
 };
-use hbb_common::{anyhow::anyhow, bail, config::Config, log};
+use base::{anyhow::anyhow, bail, config::Config, log};
 use base::message_proto::{DisplayInfo, Resolution};
 use include_dir::{include_dir, Dir};
 use objc::rc::autoreleasepool;
@@ -29,7 +29,7 @@ use std::{
 };
 
 // macOS boolean_t is defined as `int` in <mach/boolean.h>
-type BooleanT = hbb_common::libc::c_int;
+type BooleanT = base::libc::c_int;
 
 static PRIVILEGES_SCRIPTS_DIR: Dir =
     include_dir!("$CARGO_MANIFEST_DIR/src/platform/privileges_scripts");
@@ -757,7 +757,7 @@ pub fn hide_dock() {
 }
 
 pub fn handle_application_should_open_untitled_file() {
-    hbb_common::log::debug!("icon clicked on finder");
+    base::log::debug!("icon clicked on finder");
 }
 
 /// Get all resolutions of the display. The resolutions are:

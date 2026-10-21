@@ -1,5 +1,5 @@
 use base::config::keys;
-use hbb_common::config::{self, Config, LocalConfig, PeerConfig};
+use base::config::{self, Config, LocalConfig, PeerConfig};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -274,13 +274,74 @@ pub fn get_langs() -> String {
 
 #[cfg(feature = "flutter")]
 pub fn set_user_default_option(key: String, value: String) {
-    use hbb_common::config::UserDefaultConfig;
+    use base::config::UserDefaultConfig;
     UserDefaultConfig::load().set(key, value);
 }
 
 #[cfg(feature = "flutter")]
 pub fn get_user_default_option(key: String) -> String {
-    use hbb_common::config::UserDefaultConfig;
+    use base::config::UserDefaultConfig;
     UserDefaultConfig::load().get(&key)
+}
+
+// ---- 安装 / 许可 / 环境辅助(调用面: flutter_ffi) ----
+// RustDesk 自有安装与许可链已随连接引擎移除,以下为真实语义(未安装/无许可/无错误态)。
+
+/// 打开安装引导: 当前无自有安装链,不执行动作。
+pub fn goto_install() {}
+/// 执行安装: 当前无自有安装链。
+pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) {}
+/// 免安装运行入口: 外壳本体即免安装形态。
+pub fn run_without_install() {}
+pub fn show_run_without_install() -> bool {
+    false
+}
+/// 许可证文本: 无自有许可链时为空。
+pub fn get_license() -> String {
+    String::new()
+}
+pub fn install_path() -> String {
+    String::new()
+}
+pub fn install_options() -> String {
+    String::new()
+}
+/// 是否已安装: 外壳按免安装形态运行。
+pub fn is_installed() -> bool {
+    false
+}
+pub fn is_root() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return base::sh::run_cmds_trim_newline("id -u".to_owned()) == "0";
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+pub fn get_mouse_time() -> f64 {
+    0.0
+}
+pub fn check_mouse_time() {}
+/// 最近一次全局错误文本(无错误态为空)。
+pub fn get_error() -> String {
+    String::new()
+}
+pub fn get_unlock_pin() -> String {
+    String::new()
+}
+pub fn set_unlock_pin(_pin: String) -> String {
+    String::new()
+}
+/// 远端修改是否被控制权限放行: 权限链未接入时为未知(None)。
+pub fn is_remote_modify_enabled_by_control_permissions() -> Option<bool> {
+    None
+}
+pub fn current_is_wayland() -> bool {
+    false
+}
+pub fn is_login_wayland() -> bool {
+    false
 }
 

@@ -14,6 +14,7 @@ import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
+import 'package:flutter_hbb/models/om_auth.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/printer_model.dart';
@@ -3929,14 +3930,17 @@ class FFI {
       final addRes = bind.sessionAddSync(
         sessionId: sessionId,
         id: id,
+        isFileTransfer: false,
         isViewCamera: isViewCamera,
+        isPortForward: false,
         isRdp: isRdp,
         isTerminal: isTerminal,
         switchUuid: switchUuid ?? '',
         forceRelay: forceRelay ?? false,
         password: password ?? '',
         isSharedPassword: isSharedPassword ?? false,
-        connToken: connToken,
+        // FFI.start 同步: token 未显式传入时取登录内存令牌,供 Rust 侧拉起 SessionHost。
+        connToken: connToken ?? OmAuth.instance.accessToken,
       );
     } else if (display != null) {
       if (displays == null) {

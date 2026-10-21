@@ -37,15 +37,39 @@ import 'desktop/pages/remote_page.dart' as desktop_remote;
 import 'desktop/pages/view_camera_page.dart' as desktop_view_camera;
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/model.dart';
+import 'models/om_auth.dart';
 import 'models/platform_model.dart';
 
 import 'package:flutter_hbb/native/win32.dart'
     if (dart.library.html) 'package:flutter_hbb/web/win32.dart';
 import 'package:flutter_hbb/native/common.dart'
     if (dart.library.html) 'package:flutter_hbb/web/common.dart';
+export 'package:flutter_hbb/native/common.dart'
+    if (dart.library.html) 'package:flutter_hbb/web/common.dart'
+    show launchSessionHost;
 import 'package:flutter_hbb/utils/http_service.dart' as http;
 
 final globalKey = GlobalKey<NavigatorState>();
+
+enum PermissionAuthorizeType {
+  undetermined,
+  authorized,
+  denied, // and restricted
+}
+
+Future<PermissionAuthorizeType> osxCanRecordAudio() async {
+  int res = await kMacOSPermChannel.invokeMethod("canRecordAudio");
+  if (res > 0) {
+    return PermissionAuthorizeType.authorized;
+  } else if (res == 0) {
+    return PermissionAuthorizeType.undetermined;
+  } else {
+    return PermissionAuthorizeType.denied;
+  }
+}
+
+/// 预置密码警告: 密码策略已由 om-master 下发,无预置密码态,不展示警告。
+Widget buildPresetPasswordWarning() => const SizedBox.shrink();
 final navigationBarKey = GlobalKey();
 
 final isAndroid = isAndroid_;
@@ -2490,6 +2514,8 @@ connect(BuildContext context, String id,
     String? connToken,
     bool? isSharedPassword}) async {
   if (id == '') return;
+  // 登录令牌只从内存取用, 调用方未显式传入时兜底
+  connToken ??= OmAuth.instance.accessToken;
   if (!isDesktop || desktopType == DesktopType.main) {
     try {
       if (Get.isRegistered<IDTextEditingController>()) {
@@ -2508,6 +2534,12 @@ connect(BuildContext context, String id,
   forceRelay = id != oldId || forceRelay;
 
   if (isDesktop) {
+    // 连接引擎替换: 会话窗 = SessionHost 外部进程,stdin 注入 START <json>。
+    final kind = isTerminal ? 'terminal' : 'remote';
+    final started =
+        await launchSessionHost(id, kind: kind, name: id, token: connToken);
+    if (started) return;
+    // 未找到 SessionHost 时退回原多窗会话路径,保持外壳可用。
     if (desktopType == DesktopType.main) {
       await connectMainDesktop(
         id,
@@ -2515,6 +2547,7 @@ connect(BuildContext context, String id,
         isTerminal: isTerminal,
         password: password,
         isSharedPassword: isSharedPassword,
+        connToken: connToken,
         forceRelay: forceRelay,
       );
     } else {
@@ -3484,11 +3517,6 @@ Future<bool> setServerConfig(
   await bind.mainSetOption(key: 'api-server', value: config.apiServer);
   await bind.mainSetOption(key: 'key', value: config.key);
   final newApiServer = await bind.mainGetApiServer();
-  if (oldApiServer.isNotEmpty &&
-      oldApiServer != newApiServer &&
-      gFFI.userModel.isLogin) {
-    gFFI.userModel.logOut(apiServer: oldApiServer);
-  }
   return true;
 }
 

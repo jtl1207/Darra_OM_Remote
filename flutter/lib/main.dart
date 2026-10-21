@@ -61,10 +61,9 @@ Future<void> main(List<String> args) async {
     switch (kWindowType) {
       case WindowType.RemoteDesktop:
         desktopType = DesktopType.remote;
-        runMultiWindow(
-          argument,
-          kAppTypeDesktopRemote,
-        );
+        // 连接引擎替换: 会话窗 = SessionHost 外部进程,与 connect() 统一入口同步。
+        final remoteId = (argument['id'] ?? '').toString();
+        await launchSessionHost(remoteId, kind: 'remote', name: remoteId);
         break;
       case WindowType.ViewCamera:
         desktopType = DesktopType.viewCamera;
@@ -90,6 +89,22 @@ Future<void> main(List<String> args) async {
       disableWindowMovable(kWindowId);
     }
     runMainApp();
+  }
+}
+
+bool _isCmReadyToShow = false;
+
+/// 会话管理窗显示(尺寸随聊天开合,见 kConnectionManagerWindowSize*)。
+showCmWindow({bool isStartup = false}) async {
+  if (isStartup) {
+    await windowManager.show();
+    await windowManager.focus();
+    _isCmReadyToShow = true;
+  } else if (_isCmReadyToShow) {
+    if (await windowManager.getOpacity() != 1) {
+      await windowManager.setOpacity(1);
+      await windowManager.focus();
+    }
   }
 }
 
@@ -148,7 +163,7 @@ void runMainApp() async {
 
 void runMobileApp() async {
   await initEnv(kAppTypeMain);
-  if (isAndroid) androidChannelInit();
+  // (Android 服务页通道已随连接引擎移除)
   if (isAndroid) platformFFI.syncAndroidServiceAppDirConfigPath();
   draggablePositions.load();
   await gFFI.abModel.loadCache();

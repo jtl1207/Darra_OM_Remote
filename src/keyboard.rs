@@ -7,7 +7,7 @@ use crate::ui::CUR_SESSION;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::common::GrabState;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use hbb_common::log;
+use base::log;
 use base::message_proto::*;
 use crate::flutter_ffi::SessionID;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -1349,7 +1349,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
             event.position_code
         }
         OS_LOWER_MACOS => {
-            if hbb_common::config::LocalConfig::get_kb_layout_type() == "ISO" {
+            if base::config::LocalConfig::get_kb_layout_type() == "ISO" {
                 rdev::win_scancode_to_macos_iso_code(event.position_code)?
             } else {
                 rdev::win_scancode_to_macos_code(event.position_code)?
@@ -1369,7 +1369,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
     let keycode = match _peer {
         OS_LOWER_WINDOWS => rdev::linux_code_to_win_scancode(event.position_code as _)?,
         OS_LOWER_MACOS => {
-            if hbb_common::config::LocalConfig::get_kb_layout_type() == "ISO" {
+            if base::config::LocalConfig::get_kb_layout_type() == "ISO" {
                 rdev::linux_code_to_macos_iso_code(event.position_code as _)?
             } else {
                 rdev::linux_code_to_macos_code(event.position_code as _)?
@@ -1383,7 +1383,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
         OS_LOWER_WINDOWS => rdev::usb_hid_code_to_win_scancode(event.usb_hid as _)?,
         OS_LOWER_LINUX => rdev::usb_hid_code_to_linux_code(event.usb_hid as _)?,
         OS_LOWER_MACOS => {
-            if hbb_common::config::LocalConfig::get_kb_layout_type() == "ISO" {
+            if base::config::LocalConfig::get_kb_layout_type() == "ISO" {
                 rdev::usb_hid_code_to_macos_iso_code(event.usb_hid as _)?
             } else {
                 rdev::usb_hid_code_to_macos_code(event.usb_hid as _)?
@@ -1582,7 +1582,7 @@ pub fn keycode_to_rdev_key(keycode: u32) -> Key {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod input_source {
     #[cfg(target_os = "macos")]
-    use hbb_common::log;
+    use base::log;
     use crate::flutter_ffi::SessionID;
 
     use crate::ui_interface::{get_local_option, set_local_option};

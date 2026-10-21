@@ -2,7 +2,7 @@ use super::super::{
     installer_shell::{get_system_executable, path_for_cmd_environment},
     wide_string,
 };
-use hbb_common::{anyhow::anyhow, bail, ResultType};
+use base::{anyhow::anyhow, bail, ResultType};
 use std::{
     fs, mem,
     os::windows::fs::MetadataExt,

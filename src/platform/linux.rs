@@ -10,7 +10,7 @@ pub fn dispatch_wayland_display_probe() {
         wayland_display_probe_child_main();
     }
 }
-use hbb_common::{
+use base::{
     allow_err,
     anyhow::anyhow,
     bail,
@@ -289,7 +289,7 @@ thread_local! {
 }
 
 pub fn right_alt_is_level3_shift() -> ResultType<bool> {
-    use hbb_common::x11::{keysym, xlib};
+    use base::x11::{keysym, xlib};
     const XKB_USE_CORE_KBD: c_uint = 0x0100;
     // A fresh connection avoids Xlib's stale keymap cache after a layout switch.
     // This query runs only for a matched chord with physical Right Alt held.
@@ -1658,7 +1658,7 @@ pub fn elevate(args: Vec<&str>) -> ResultType<bool> {
             Ok(res)
         }
         None => {
-            hbb_common::bail!("Failed to get current exe as str");
+            base::bail!("Failed to get current exe as str");
         }
     }
 }
@@ -2017,7 +2017,7 @@ mod desktop {
                 // left in place: a non-empty display here suppresses every fallback below, both
                 // `get_display_by_user` and the `:0` default, so anything not local must not pass.
                 let display = Self::get_display_from_session(&self.sid)
-                    .replace(&hbb_common::whoami::hostname(), "");
+                    .replace(&base::whoami::hostname(), "");
                 if display.strip_prefix(':').map_or(false, |number| {
                     number.starts_with(|c: char| c.is_ascii_digit())
                 }) {
@@ -2032,7 +2032,7 @@ mod desktop {
             }
             self.display = self
                 .display
-                .replace(&hbb_common::whoami::hostname(), "")
+                .replace(&base::whoami::hostname(), "")
                 .replace("localhost", "");
         }
 

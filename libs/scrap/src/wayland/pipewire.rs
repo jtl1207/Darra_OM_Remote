@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 
 use base::platform::linux::{WaylandDisplayInfo, CMD_SH};
 use anyhow::{anyhow, bail, Result as ResultType};
-// config(LocalConfig 等)仍挂在 hbb_common(共同件)。
-use hbb_common::config;
+// config(LocalConfig 等)仍挂在 base(共同件)。
+use base::config;
 
 use super::capturable::PixelProvider;
 use super::capturable::{Capturable, Recorder};

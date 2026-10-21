@@ -42,7 +42,7 @@ libloading = "0.8"
 tokio = { version = "1.44", features = ["full"] }
 serde_json = "1.0"
 serde = {version="1.0", features=["derive"]}
-# 与原 hbb_common 同源的 sysinfo 分支(codec.rs 的系统信息查询)
+# 与原 base 同源的 sysinfo 分支(codec.rs 的系统信息查询)
 sysinfo = { git = "https://github.com/rustdesk-org/sysinfo", branch = "rlim_max" }
 
 [dependencies.winapi]

@@ -4,7 +4,9 @@
 源出处：`src/控制端/web/public/icon.svg`（与商城/官网/EtherCAT 文档站同源），留档于 `svg/darra-mark.svg`；单色变体 `svg/darra-mark-mono.svg`。
 应用名：**Darra 远程**。再生产：`python tools/gen_icons.py`（纯 PIL，无外部依赖）。
 
-## 本包布局 → 魔改树落点
+## branding/ 布局 → 魔改树落点
+
+本包 = `src/控制端/rustdesk/branding/`（品牌资产源 + 生成脚本家）。下表源路径相对本包，落点相对 `src/控制端/rustdesk/`。
 
 | 本包路径 | 魔改树落点 (拷贝目标) | 说明 |
 |---|---|---|
@@ -13,9 +15,9 @@
 | `common/icon.png` | `res/icon.png` | 1024 母版 |
 | `common/32x32.png` `64x64.png` `128x128.png` `128x128@2x.png` | `res/` 同名 | 桌面/系统图标降采样集（256=@2x） |
 | `common/icon-512.png` | 通用应用图标（商店/文档/PWA 等） | 512 PNG |
-| `common/logo.png` | `flutter_assets/assets/logo.png` | 关于页 logo，深色字（浅底用） |
-| `common/logo_light.png` | `flutter_assets/assets/logo_light.png` | 浅色主题变体（同 logo.png 深色字） |
-| `common/logo_dark.png` | `flutter_assets/assets/logo_dark.png` | 深色主题变体（白字） |
+| `common/logo.png` | `flutter/assets/logo.png` | 关于页 logo，深色字（浅底用） |
+| `common/logo_light.png` | `flutter/assets/logo_light.png` | 浅色主题变体（同 logo.png 深色字） |
+| `common/logo_dark.png` | `flutter/assets/logo_dark.png` | 深色主题变体（白字） |
 | `common/splash.png` | 启动图（各端 splash 画布取中间 logo 或整图） | 1280x720 品牌黑底 + 标 + 「Darra 远程」 |
 | `svg/darra-mark.svg` | `flutter/assets/icon.svg`（应用内矢量图标同源替换） | 品牌标 SVG 源 |
 | `svg/darra-mark-mono.svg` | 单色/主题化备用源 | 白形体透明底 |
@@ -24,9 +26,9 @@
 | `android/mipmap-*/ic_launcher_foreground.png` | 同目录 `ic_launcher_foreground.png` | 自适应前景 108/162/216/324/432 |
 | `android/mipmap-*/ic_stat_logo.png` | 同目录 `ic_stat_logo.png` | 通知栏状态 24/36/48/72/96，LA 模式 |
 | `android/mipmap-*/ic_launcher_monochrome.png` | 同目录 `ic_launcher_monochrome.png` | 主题化图标单色前景（比 rustdesk 多的专用件，XML 已指向它） |
-| `android/mipmap-anydpi-v26/ic_launcher.xml` `ic_launcher_round.xml` | `res/mipmap-anydpi-v26/` 同名 | 自适应图标定义，`monochrome` 指 `ic_launcher_monochrome` |
-| `android/values/ic_launcher_background.xml` | `res/values/`（并入现有 colors/values） | 自适应背景色 `#161616` |
-| `android/values/strings.xml` | 并入 `res/values/strings.xml` 的 `app_name` | `<string name="app_name">Darra 远程</string>` |
+| `android/mipmap-anydpi-v26/ic_launcher.xml` `ic_launcher_round.xml` | `flutter/android/app/src/main/res/mipmap-anydpi-v26/` 同名 | 自适应图标定义，`monochrome` 指 `ic_launcher_monochrome` |
+| `android/values/ic_launcher_background.xml` | `flutter/android/app/src/main/res/values/`（并入现有 colors/values） | 自适应背景色 `#161616` |
+| `android/values/strings.xml` | 并入 `flutter/android/app/src/main/res/values/strings.xml` 的 `app_name` | `<string name="app_name">Darra 远程</string>` |
 
 ## 尺寸对照（与 rustdesk 实测一致）
 

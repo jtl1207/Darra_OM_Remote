@@ -1,5 +1,5 @@
 use crate::lang::translate;
-use hbb_common::{allow_err, log};
+use base::{allow_err, log};
 use base::config::keys;
 use std::sync::{Arc, Mutex};
 
@@ -14,9 +14,9 @@ pub fn start_tray() {
     allow_err!(make_tray());
 }
 
-fn make_tray() -> hbb_common::ResultType<()> {
+fn make_tray() -> base::ResultType<()> {
     // https://github.com/tauri-apps/tray-icon/blob/dev/examples/tao.rs
-    use hbb_common::anyhow::Context;
+    use base::anyhow::Context;
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
     use tray_icon::{
         menu::{Menu, MenuEvent, MenuItem},

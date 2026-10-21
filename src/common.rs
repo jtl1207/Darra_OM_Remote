@@ -8,8 +8,8 @@ use serde_json::json;
 
 use base::config::keys;
 #[cfg(not(target_os = "ios"))]
-use hbb_common::whoami;
-use hbb_common::{
+use base::whoami;
+use base::{
     base64,
     config::{self, LocalConfig},
     futures_util::future::poll_fn,
@@ -20,6 +20,62 @@ use hbb_common::{
 
 // the executable name of the portable version
 pub const PORTABLE_APPNAME_RUNTIME_ENV_KEY: &str = "RUSTDESK_APPNAME";
+
+/// 抓键循环状态。
+#[derive(Debug, Eq, PartialEq)]
+pub enum GrabState {
+    Ready,
+    Run,
+    Wait,
+    Exit,
+}
+
+/// 鼠标/输入事件类型常量(与消息协议一致)。
+pub mod input {
+    pub const MOUSE_TYPE_MOVE: i32 = 0;
+    pub const MOUSE_TYPE_DOWN: i32 = 1;
+    pub const MOUSE_TYPE_UP: i32 = 2;
+    pub const MOUSE_TYPE_WHEEL: i32 = 3;
+    pub const MOUSE_TYPE_TRACKPAD: i32 = 4;
+    /// 相对位移(游戏/3D),仅 Flutter 端支持。
+    pub const MOUSE_TYPE_MOVE_RELATIVE: i32 = 5;
+    /// 事件类型掩码(低 3 位)。
+    pub const MOUSE_TYPE_MASK: i32 = 0x7;
+    pub const MOUSE_BUTTON_LEFT: i32 = 0x01;
+    pub const MOUSE_BUTTON_RIGHT: i32 = 0x02;
+    pub const MOUSE_BUTTON_WHEEL: i32 = 0x04;
+    pub const MOUSE_BUTTON_BACK: i32 = 0x08;
+    pub const MOUSE_BUTTON_FORWARD: i32 = 0x10;
+}
+
+const MIN_VER_MULTI_UI_SESSION: &str = "1.2.4";
+const MIN_VER_RELATIVE_MOUSE: &str = "1.4.0";
+
+/// 多 UI 会话支持(按对端版本)。
+#[inline]
+pub fn is_support_multi_ui_session(ver: &str) -> bool {
+    is_support_multi_ui_session_num(base::get_version_number(ver))
+}
+
+#[inline]
+pub fn is_support_multi_ui_session_num(ver: i64) -> bool {
+    ver >= base::get_version_number(MIN_VER_MULTI_UI_SESSION)
+}
+
+/// 相对鼠标模式支持(按对端版本)。
+#[inline]
+pub fn is_support_relative_mouse_mode_num(ver: i64) -> bool {
+    ver >= base::get_version_number(MIN_VER_RELATIVE_MOUSE)
+}
+
+#[inline]
+pub fn is_control_key(evt: &base::message_proto::KeyEvent, key: &base::message_proto::ControlKey) -> bool {
+    if let Some(base::message_proto::key_event::Union::ControlKey(ck)) = evt.union {
+        ck.enum_value() == Ok(*key)
+    } else {
+        false
+    }
+}
 
 pub const PLATFORM_WINDOWS: &str = "Windows";
 pub const PLATFORM_LINUX: &str = "Linux";
@@ -155,7 +211,7 @@ pub fn hostname() -> String {
 
 #[inline]
 pub fn get_sysinfo() -> serde_json::Value {
-    use hbb_common::sysinfo::System;
+    use base::sysinfo::System;
     let mut system = System::new();
     system.refresh_memory();
     system.refresh_cpu();
@@ -204,20 +260,20 @@ pub const POSTFIX_SERVICE: &'static str = "_service";
 
 #[inline]
 pub fn get_app_name() -> String {
-    hbb_common::config::APP_NAME.read().unwrap().clone()
+    base::config::APP_NAME.read().unwrap().clone()
 }
 
 #[inline]
 pub fn is_rustdesk() -> bool {
-    hbb_common::config::APP_NAME.read().unwrap().eq("RustDesk")
+    base::config::APP_NAME.read().unwrap().eq("RustDesk")
 }
 
 #[cfg(target_os = "macos")]
 pub fn get_full_name() -> String {
     format!(
         "{}.{}",
-        hbb_common::config::ORG.read().unwrap(),
-        hbb_common::config::APP_NAME.read().unwrap(),
+        base::config::ORG.read().unwrap(),
+        base::config::APP_NAME.read().unwrap(),
     )
 }
 
@@ -261,7 +317,7 @@ pub fn check_process(arg: &str, same_session_id: bool) -> bool {
         same_session_id,
     ) {
         Ok(pids) => {
-            let self_pid = hbb_common::sysinfo::Pid::from_u32(std::process::id());
+            let self_pid = base::sysinfo::Pid::from_u32(std::process::id());
             pids.into_iter().filter(|pid| *pid != self_pid).count() > 0
         }
         Err(e) => {
@@ -280,7 +336,7 @@ pub fn check_process(arg: &str, mut same_uid: bool) -> bool {
         log::warn!("Can not get other process's command line arguments on macos without root");
         same_uid = true;
     }
-    use hbb_common::sysinfo::System;
+    use base::sysinfo::System;
     let mut sys = System::new();
     sys.refresh_processes();
     let mut path = std::env::current_exe().unwrap_or_default();
@@ -586,7 +642,7 @@ pub fn is_valid_untrusted_peer_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hbb_common::tokio::{
+    use base::tokio::{
         self,
         time::{interval, interval_at, sleep, Duration, Instant, Interval},
     };

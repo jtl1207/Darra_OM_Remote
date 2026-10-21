@@ -6,7 +6,7 @@ use std::{
 
 use sciter::Value;
 
-use hbb_common::{
+use base::{
     allow_err,
     config::{LocalConfig, PeerConfig},
     log,

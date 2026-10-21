@@ -1,4 +1,4 @@
-use hbb_common::{log, thiserror};
+use base::{log, thiserror};
 use std::{
     ffi::OsStr,
     io,

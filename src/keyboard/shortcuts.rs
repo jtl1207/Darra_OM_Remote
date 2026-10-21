@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use hbb_common::log;
+use base::log;
 use crate::flutter_ffi::SessionID;
 use serde::{Deserialize, Serialize};
 
@@ -245,7 +245,7 @@ pub fn event_to_key_name(event: &rdev::Event) -> Option<String> {
 /// bindings). Call this once at startup and again whenever the config is
 /// written.
 pub fn reload_from_config() {
-    let raw = hbb_common::config::LocalConfig::get_option(LOCAL_CONFIG_KEY);
+    let raw = base::config::LocalConfig::get_option(LOCAL_CONFIG_KEY);
     #[cfg(target_os = "linux")]
     let is_wayland = crate::platform::linux::current_is_wayland();
     #[cfg(not(target_os = "linux"))]
@@ -341,7 +341,7 @@ pub fn match_event(event: &rdev::Event) -> Option<String> {
             Ok(true) => return None,
             Ok(false) => {}
             Err(err) => {
-                hbb_common::throttled_log!(std::time::Duration::from_secs(5), warn,
+                base::throttled_log!(std::time::Duration::from_secs(5), warn,
                     "Cannot identify AltGraph for keyboard shortcuts: {}", err);
                 return None;
             }

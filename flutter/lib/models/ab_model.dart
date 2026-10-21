@@ -63,6 +63,16 @@ class AbModel {
   var _pulledOnce = false;
   var listInitialized = false;
 
+  /// 旧式地址簿界面开关(UI 兼容位,om-master 视图下恒 false)。
+  final RxBool legacyMode = false.obs;
+
+  /// 共享密码变更: 密码策略归 om-master 下发,地址簿侧暂不支持直改。
+  Future<bool> changeSharedPassword(
+      String abName, String id, String password) async {
+    debugPrint('changeSharedPassword: 策略归 om-master 下发,忽略 $abName/$id');
+    return false;
+  }
+
   late final Peers peersModel;
 
   WeakReference<FFI> parent;

@@ -12,6 +12,6 @@ fn main() {
         }
         std::process::exit(0);
     }
-    hbb_common::init_log(false, "service");
+    base::init_log(false, "service");
     librustdesk::start_os_service();
 }

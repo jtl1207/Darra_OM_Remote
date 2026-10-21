@@ -28,10 +28,10 @@ use base::message_proto::{
     feature = "vram",
     target_os = "windows"
 ))]
-use hbb_common::config::option2bool;
+use base::config::option2bool;
 use anyhow::{anyhow, bail, Result as ResultType};
-// Config/PeerConfig 仍挂在 hbb_common(共同件)。
-use hbb_common::config::{Config, PeerConfig};
+// Config/PeerConfig 仍挂在 base(共同件)。
+use base::config::{Config, PeerConfig};
 use sysinfo::System;
 
 lazy_static::lazy_static! {
@@ -883,7 +883,7 @@ pub fn enable_directx_capture() -> bool {
 #[cfg(windows)]
 pub fn allow_d3d_render() -> bool {
     use base::config::keys::OPTION_ALLOW_D3D_RENDER as OPTION;
-    option2bool(OPTION, &hbb_common::config::LocalConfig::get_option(OPTION))
+    option2bool(OPTION, &base::config::LocalConfig::get_option(OPTION))
 }
 
 pub const BR_BEST: f32 = 1.5;

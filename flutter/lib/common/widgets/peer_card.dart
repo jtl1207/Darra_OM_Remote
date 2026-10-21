@@ -1264,3 +1264,41 @@ void connectInPeerTab(BuildContext context, Peer peer, PeerTabIndex tab,
       isTerminal: isTerminal,
       isViewCamera: isViewCamera);
 }
+
+/// 在线状态小圆点(设备卡片/联想列表共用)。
+Widget getOnline(double rightPadding, bool online) {
+  return Tooltip(
+      message: translate(online ? 'Online' : 'Offline'),
+      waitDuration: const Duration(seconds: 1),
+      child: Padding(
+          padding: EdgeInsets.fromLTRB(0, 4, rightPadding, 4),
+          child: CircleAvatar(
+              radius: 3, backgroundColor: online ? Colors.green : kColorWarn)));
+}
+
+/// 更多操作占位按钮(设备卡片/地址簿共用)。
+Widget build_more(BuildContext context, {bool invert = false}) {
+  final RxBool hover = false.obs;
+  return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () {},
+      onHover: (value) => hover.value = value,
+      child: Obx(() => CircleAvatar(
+          radius: 14,
+          backgroundColor: hover.value
+              ? (invert
+                  ? Theme.of(context).colorScheme.background
+                  : Theme.of(context).scaffoldBackgroundColor)
+              : (invert
+                  ? Theme.of(context).scaffoldBackgroundColor
+                  : Theme.of(context).colorScheme.background),
+          child: Icon(Icons.more_vert,
+              size: 18,
+              color: hover.value
+                  ? Theme.of(context).textTheme.titleLarge?.color
+                  : Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.color
+                      ?.withOpacity(0.5)))));
+}

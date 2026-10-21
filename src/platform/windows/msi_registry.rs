@@ -1,7 +1,7 @@
 use super::{
     normalize_msi_product_code, ResultType, MSI_WINDOWS_INSTALLER_VALUE, REG_NAME_WINDOWS_INSTALLER,
 };
-use hbb_common::{anyhow::anyhow, bail, log};
+use base::{anyhow::anyhow, bail, log};
 use std::collections::BTreeSet;
 use winreg::{enums::*, RegKey};
 

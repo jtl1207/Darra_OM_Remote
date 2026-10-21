@@ -4,7 +4,7 @@
 use crate::lang::translate;
 use base::platform::linux::CMD_SH;
 use gtk::{glib, prelude::*};
-use hbb_common::{
+use base::{
     anyhow::{bail, Error},
     log, ResultType,
 };
@@ -758,7 +758,7 @@ fn error_dialog_and_exit(err_msg: &str, exit_code: i32) {
 
 fn quote_shell_arg(arg: &str, add_splash_if_match: bool) -> String {
     let mut rv = arg.to_string();
-    let re = hbb_common::regex::Regex::new("(\\s|[][!\"#$&'()*,;<=>?\\^`{}|~])");
+    let re = base::regex::Regex::new("(\\s|[][!\"#$&'()*,;<=>?\\^`{}|~])");
     let Ok(re) = re else {
         return rv;
     };

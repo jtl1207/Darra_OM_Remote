@@ -1,6 +1,6 @@
 use super::{validate_install_app_name, CursorData, ResultType};
 use base::message_proto::{DisplayInfo, Resolution, WindowsSession};
-use hbb_common::{
+use base::{
     allow_err,
     anyhow::anyhow,
     bail,
@@ -2626,7 +2626,7 @@ pub fn uninstall_cert() -> ResultType<()> {
 }
 
 mod cert {
-    use hbb_common::ResultType;
+    use base::ResultType;
 
     extern "C" {
         fn DeleteRustDeskTestCertsW();
@@ -3194,7 +3194,7 @@ pub fn try_set_window_foreground(window: HWND) {
 }
 
 pub mod reg_display_settings {
-    use hbb_common::ResultType;
+    use base::ResultType;
     use serde_derive::{Deserialize, Serialize};
     use std::collections::HashMap;
     use winreg::{enums::*, RegValue};
@@ -3477,7 +3477,7 @@ pub fn get_pids_with_first_arg_check_session<S1: AsRef<str>, S2: AsRef<str>>(
     name: S1,
     arg: S2,
     same_session_id: bool,
-) -> ResultType<Vec<hbb_common::sysinfo::Pid>> {
+) -> ResultType<Vec<base::sysinfo::Pid>> {
     // Though `wmic` can return the sessionId, for simplicity we only return processid.
     let pids = get_pids_with_first_arg_by_wmic(name, arg);
     if !same_session_id {
@@ -3509,14 +3509,14 @@ fn get_pids_with_first_arg_from_wmic_output(
     output: std::borrow::Cow<'_, str>,
     name: &str,
     arg: &str,
-) -> Vec<hbb_common::sysinfo::Pid> {
+) -> Vec<base::sysinfo::Pid> {
     let mut pids = Vec::new();
     let mut proc_found = false;
     for line in output.lines() {
         if line.starts_with("ProcessId=") {
             if proc_found {
                 if let Ok(pid) = line["ProcessId=".len()..].trim().parse::<u32>() {
-                    pids.push(hbb_common::sysinfo::Pid::from_u32(pid));
+                    pids.push(base::sysinfo::Pid::from_u32(pid));
                 }
                 proc_found = false;
             }
@@ -3555,7 +3555,7 @@ fn get_pids_with_first_arg_from_wmic_output(
 pub(super) fn get_pids_with_first_arg_by_wmic<S1: AsRef<str>, S2: AsRef<str>>(
     name: S1,
     arg: S2,
-) -> Vec<hbb_common::sysinfo::Pid> {
+) -> Vec<base::sysinfo::Pid> {
     let name = name.as_ref().to_lowercase();
     let arg = arg.as_ref().to_lowercase();
     std::process::Command::new("wmic.exe")

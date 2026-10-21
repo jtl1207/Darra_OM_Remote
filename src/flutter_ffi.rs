@@ -10,7 +10,7 @@ use crate::{
     ui_interface::{self, *},
 };
 use flutter_rust_bridge::{StreamSink, SyncReturn};
-use hbb_common::{
+use base::{
     config::{self, LocalConfig, PeerConfig, PeerInfoSerde},
     lazy_static, log,
     rendezvous_proto::ConnType,
@@ -54,11 +54,11 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
                 .with_tag("ffi"), // logs will show under mytag tag
         );
         #[cfg(not(debug_assertions))]
-        hbb_common::init_log(false, "");
+        base::init_log(false, "");
     }
     #[cfg(target_os = "ios")]
     {
-        use hbb_common::env_logger::*;
+        use base::env_logger::*;
         init_from_env(Env::default().filter_or(DEFAULT_FILTER_ENV, "debug"));
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -68,7 +68,7 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         // core_main's init_log does not work for flutter since it is only applied to its load_library in main.c
-        hbb_common::init_log(false, "flutter_ffi");
+        base::init_log(false, "flutter_ffi");
     }
 }
 
@@ -216,10 +216,10 @@ fn decode_kept_cursor(
     const MAX_CURSOR_SIZE: i32 = 512;
     const RGBA_CHANNELS: usize = 4;
     if !(1..=MAX_CURSOR_SIZE).contains(&cd.width) || !(1..=MAX_CURSOR_SIZE).contains(&cd.height) {
-        hbb_common::bail!("invalid source size {}x{}", cd.width, cd.height);
+        base::bail!("invalid source size {}x{}", cd.width, cd.height);
     }
     if !(0..cd.width).contains(&cd.hotx) || !(0..cd.height).contains(&cd.hoty) {
-        hbb_common::bail!(
+        base::bail!(
             "hotspot ({},{}) is outside the cursor image",
             cd.hotx,
             cd.hoty
@@ -228,17 +228,17 @@ fn decode_kept_cursor(
     let expected = (cd.width as usize)
         .checked_mul(cd.height as usize)
         .and_then(|pixels| pixels.checked_mul(RGBA_CHANNELS))
-        .ok_or_else(|| hbb_common::anyhow::anyhow!("cursor RGBA size overflow"))?;
+        .ok_or_else(|| base::anyhow::anyhow!("cursor RGBA size overflow"))?;
     let max_compressed_size = zstd::zstd_safe::compress_bound(expected);
     if cd.colors.len() > max_compressed_size {
-        hbb_common::bail!(
+        base::bail!(
             "compressed cursor data too large: {} bytes (limit {max_compressed_size})",
             cd.colors.len()
         );
     }
     let colors = zstd::bulk::decompress(&cd.colors, expected)?;
     if colors.len() != expected {
-        hbb_common::bail!("invalid RGBA length: expected {expected}, got {}", colors.len());
+        base::bail!("invalid RGBA length: expected {expected}, got {}", colors.len());
     }
     cd.colors = colors.into();
     Ok(cd)
@@ -1436,7 +1436,7 @@ pub fn session_register_gpu_texture(
 
 
 pub fn version_to_number(v: String) -> SyncReturn<i64> {
-    SyncReturn(hbb_common::get_version_number(&v))
+    SyncReturn(base::get_version_number(&v))
 }
 
 
@@ -1729,7 +1729,7 @@ pub fn main_set_common(_key: String, _value: String) {
 
 #[cfg(target_os = "android")]
 pub mod mobile_ffi {
-    use hbb_common::log;
+    use base::log;
     use jni::{
         objects::{JClass, JString},
         sys::jstring,
@@ -1800,3 +1800,378 @@ pub mod mobile_ffi {
     }
 }
 
+
+// ==== 连接引擎外置后的 FFI 兼容面: 签名对齐生成桥, 会话动作由 SessionHost 窗口承载 ====
+
+pub fn cm_init() {
+    let _ = ();
+    
+}
+
+pub fn cm_send_chat(conn_id: i32, msg: String) {
+    let _ = ();
+    
+}
+
+pub fn main_change_id(new_id: String) {
+    let _ = ();
+    
+}
+
+pub fn main_check_connect_status() {
+    let _ = ();
+    
+}
+
+pub fn main_check_super_user_permission() -> bool {
+    let _ = ();
+    false
+}
+
+pub fn main_clear_ab() {
+    let _ = ();
+    
+}
+
+pub fn main_clear_trusted_devices() {
+    let _ = ();
+    
+}
+
+pub fn main_create_shortcut(_id: String) {
+    let _ = ();
+    
+}
+
+pub fn main_deploy_device(token: String, id: String) -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_device_id(id: String) {
+    let _ = ();
+    
+}
+
+pub fn main_device_name(name: String) {
+    let _ = ();
+    
+}
+
+pub fn main_discover() {
+    let _ = ();
+    
+}
+
+pub fn main_forget_password(id: String) {
+    let _ = ();
+    
+}
+
+pub fn main_get_api_server() -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_get_async_status() -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_get_fingerprint() -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_get_http_status(url: String) -> Option<String> {
+    let _ = ();
+    None
+}
+
+pub fn main_get_my_id() -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_get_proxy_status() -> bool {
+    let _ = ();
+    false
+}
+
+pub fn main_get_trusted_devices() -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_handle_relay_id(id: String) -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_has_valid_bot_sync() -> SyncReturn<bool> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn main_http_request(url: String, method: String, body: Option<String>, header: String) {
+    let _ = ();
+    
+}
+
+pub fn main_is_can_input_monitoring(prompt: bool) -> SyncReturn<bool> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn main_is_can_screen_recording(prompt: bool) -> SyncReturn<bool> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn main_is_installed_daemon(prompt: bool) -> SyncReturn<bool> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn main_is_process_trusted(prompt: bool) -> SyncReturn<bool> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn main_is_using_public_server() -> bool {
+    let _ = ();
+    false
+}
+
+pub fn main_load_ab() -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_load_lan_peers() {
+    let _ = ();
+    
+}
+
+pub fn main_max_encrypt_len() -> SyncReturn<usize> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn main_peer_has_password(id: String) -> bool {
+    let _ = ();
+    false
+}
+
+pub fn main_remove_discovered(id: String) {
+    let _ = ();
+    
+}
+
+pub fn main_remove_trusted_devices(json: String) {
+    let _ = ();
+    
+}
+
+pub fn main_save_ab(json: String) {
+    let _ = ();
+    
+}
+
+pub fn main_start_dbus_server() {
+    let _ = ();
+    
+}
+
+pub fn main_start_ipc_url_server() {
+    let _ = ();
+    
+}
+
+pub fn main_supported_hwdecodings() -> SyncReturn<String> {
+    let _ = ();
+    SyncReturn(String::new())
+}
+
+pub fn main_test_if_valid_server(server: String, test_with_proxy: bool) -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_uri_prefix_sync() -> SyncReturn<String> {
+    let _ = ();
+    SyncReturn(String::new())
+}
+
+pub fn main_verify_bot(token: String) -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn main_wol(id: String) {
+    let _ = ();
+    
+}
+
+pub fn query_onlines(ids: Vec<String>) {
+    let _ = ();
+    
+}
+
+pub fn send_url_scheme(_url: String) {
+    let _ = ();
+    
+}
+
+pub fn session_alternative_codecs(session_id: SessionID) -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn session_change_prefer_codec(session_id: SessionID) {
+    let _ = ();
+    
+}
+
+pub fn session_close_terminal(session_id: SessionID, terminal_id: i32) {
+    let _ = ();
+    
+}
+
+pub fn session_elevate_direct(session_id: SessionID) {
+    let _ = ();
+    
+}
+
+pub fn session_elevate_with_logon(session_id: SessionID, username: String, password: String) {
+    let _ = ();
+    
+}
+
+pub fn session_get_audit_guid(session_id: SessionID) -> SyncReturn<String> {
+    let _ = ();
+    SyncReturn(String::new())
+}
+
+pub fn session_get_audit_server_sync(session_id: SessionID, typ: String) -> SyncReturn<String> {
+    let _ = ();
+    SyncReturn(String::new())
+}
+
+pub fn session_get_common_sync(
+    session_id: SessionID,
+    key: String,
+    param: String,
+) -> SyncReturn<Option<String>> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn session_get_conn_token(session_id: SessionID) -> SyncReturn<Option<String>> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn session_get_is_recording(session_id: SessionID) -> SyncReturn<bool> {
+    let _ = ();
+    SyncReturn(Default::default())
+}
+
+pub fn session_get_last_audit_note(session_id: SessionID) -> SyncReturn<String> {
+    let _ = ();
+    SyncReturn(String::new())
+}
+
+pub fn session_get_remember(session_id: SessionID) -> Option<bool> {
+    let _ = ();
+    None
+}
+
+pub fn session_handle_screenshot(
+    #[allow(unused_variables)] session_id: SessionID,
+    action: String,
+) -> String {
+    let _ = ();
+    String::new()
+}
+
+pub fn session_input_os_password(session_id: SessionID, value: String) {
+    let _ = ();
+    
+}
+
+pub fn session_login(
+    session_id: SessionID,
+    os_username: String,
+    os_password: String,
+    password: String,
+    remember: bool,
+) {
+    let _ = ();
+    
+}
+
+pub fn session_open_terminal(session_id: SessionID, terminal_id: i32, rows: u32, cols: u32) {
+    let _ = ();
+    
+}
+
+pub fn session_reconnect(session_id: SessionID, force_relay: bool) {
+    let _ = ();
+    
+}
+
+pub fn session_record_screen(session_id: SessionID, start: bool) {
+    let _ = ();
+    
+}
+
+pub fn session_resize_terminal(session_id: SessionID, terminal_id: i32, rows: u32, cols: u32) {
+    let _ = ();
+    
+}
+
+pub fn session_restart_remote_device(session_id: SessionID) {
+    let _ = ();
+    
+}
+
+pub fn session_send_chat(session_id: SessionID, text: String) {
+    let _ = ();
+    
+}
+
+pub fn session_send_note(session_id: SessionID, note: String) {
+    let _ = ();
+    
+}
+
+pub fn session_send_selected_session_id(session_id: SessionID, sid: String) {
+    let _ = ();
+    
+}
+
+pub fn session_send_terminal_input(session_id: SessionID, terminal_id: i32, data: String) {
+    let _ = ();
+    
+}
+
+pub fn session_set_common(session_id: SessionID, key: String, value: String) {
+    let _ = ();
+    
+}
+
+pub fn session_switch_sides(session_id: SessionID) {
+    let _ = ();
+    
+}
+
+pub fn session_take_screenshot(session_id: SessionID, display: usize) {
+    let _ = ();
+    
+}
+
+pub fn session_toggle_virtual_display(session_id: SessionID, index: i32, on: bool) {
+    let _ = ();
+    
+}

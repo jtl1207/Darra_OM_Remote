@@ -522,7 +522,7 @@ impl HwCodecConfig {
         log::info!("set hwcodec config");
         log::debug!("{config:?}");
         #[cfg(any(windows, target_os = "macos"))]
-        hbb_common::config::common_store(
+        base::config::common_store(
             &HwCodecConfig2 {
                 config: serde_json::to_string_pretty(&config).unwrap_or_default(),
             },
@@ -605,7 +605,7 @@ impl HwCodecConfig {
                 Some(c) => c,
                 None => {
                     log::info!("try load cached hwcodec config");
-                    let c = hbb_common::config::common_load::<HwCodecConfig2>("_hwcodec");
+                    let c = base::config::common_load::<HwCodecConfig2>("_hwcodec");
                     let c: HwCodecConfig = serde_json::from_str(&c.config).unwrap_or_default();
                     let new_signature = hwcodec::common::get_gpu_signature();
                     if c.signature == new_signature {

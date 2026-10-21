@@ -1,7 +1,7 @@
 // https://learn.microsoft.com/en-us/windows/win32/secgloss/security-glossary
 
 use super::{read_token_user_buffer, wide_string, ResultType};
-use hbb_common::{anyhow::anyhow, bail};
+use base::{anyhow::anyhow, bail};
 use std::{
     fs, io,
     os::windows::{ffi::OsStrExt, fs::MetadataExt},
@@ -515,7 +515,7 @@ mod tests {
         set_path_permission_for_portable_service_shmem_file, sid_string_to_local_alloc_guard,
         LocalAllocGuard, ResultType,
     };
-    use hbb_common::bail;
+    use base::bail;
     use std::{
         fs,
         os::windows::{ffi::OsStrExt, fs::symlink_dir, fs::symlink_file},
@@ -544,7 +544,7 @@ mod tests {
             "rustdesk_acl_{}_{}_{}",
             prefix,
             std::process::id(),
-            hbb_common::rand::random::<u32>()
+            base::rand::random::<u32>()
         ))
     }
 

@@ -1,11 +1,12 @@
 use crate::flutter_ffi::{EventToUI, SessionID};
+use crate::ui_session_interface::{io_loop, InvokeUiSession, QualityStatus, Session};
 use flutter_rust_bridge::StreamSink;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use hbb_common::dlopen::{
+use base::dlopen::{
     symbor::{Library, Symbol},
     Error as LibError,
 };
-use hbb_common::{
+use base::{
     anyhow::anyhow, bail, config::LocalConfig, get_version_number, log,
     rendezvous_proto::ConnType, ResultType,
 };
@@ -110,7 +111,7 @@ fn load_plugin_in_app_path(dll_name: &str) -> Result<Library, LibError> {
 pub extern "C" fn rustdesk_core_main() -> bool {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        use hbb_common::libc;
+        use base::libc;
 
         // Native runners bypass Rust's startup, which normally ignores SIGPIPE.
         if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
@@ -166,7 +167,7 @@ pub extern "C" fn rustdesk_core_main_args(args_len: *mut c_int) -> *mut *mut c_c
 #[cfg(windows)]
 #[no_mangle]
 pub extern "C" fn rustdesk_is_disable_installation() -> c_int {
-    hbb_common::config::is_disable_installation() as c_int
+    base::config::is_disable_installation() as c_int
 }
 
 // https://gist.github.com/iskakaushik/1c5b8aa75c77479c33c4320913eebef6

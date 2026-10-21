@@ -6,7 +6,7 @@ use crate::platform::breakdown_callback;
 #[cfg(not(debug_assertions))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use base::platform::register_breakdown_handler;
-use hbb_common::{config, log};
+use base::{config, log};
 #[cfg(windows)]
 use tauri_winrt_notification::{Duration, Sound, Toast};
 
@@ -24,7 +24,7 @@ macro_rules! my_println{
 
 pub enum CoreMainAction {
     StartUi(Vec<String>),
-    ExitFailure(hbb_common::anyhow::Error),
+    ExitFailure(base::anyhow::Error),
 }
 
 /// shared by flutter and sciter main function
@@ -73,8 +73,8 @@ pub fn core_main() -> Option<CoreMainAction> {
             && crate::platform::is_cur_exe_the_installed();
         if should_check_start_tray && !crate::check_process("--tray", true) {
             #[cfg(target_os = "linux")]
-            hbb_common::allow_err!(crate::platform::check_autostart_config());
-            hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
+            base::allow_err!(crate::platform::check_autostart_config());
+            base::allow_err!(crate::run_me(vec!["--tray"]));
         }
     }
     #[cfg(not(debug_assertions))]
@@ -124,7 +124,7 @@ pub fn core_main() -> Option<CoreMainAction> {
             log_name = name;
         }
     }
-    hbb_common::init_log(false, &log_name);
+    base::init_log(false, &log_name);
 
     #[cfg(windows)]
     if !crate::platform::is_installed() && (_is_elevate || _is_run_as_system) {
@@ -134,7 +134,7 @@ pub fn core_main() -> Option<CoreMainAction> {
     if args.is_empty() {
         #[cfg(windows)]
         {
-            hbb_common::config::PeerConfig::preload_peers();
+            base::config::PeerConfig::preload_peers();
         }
     } else {
         #[cfg(windows)]
@@ -179,7 +179,7 @@ pub fn core_main() -> Option<CoreMainAction> {
                 return None;
             } else if args[0] == "--uninstall-cert" {
                 #[cfg(windows)]
-                hbb_common::allow_err!(crate::platform::windows::uninstall_cert());
+                base::allow_err!(crate::platform::windows::uninstall_cert());
                 return None;
             } else if args[0] == "--install-remote-printer" {
                 #[cfg(windows)]
@@ -253,7 +253,7 @@ pub fn core_main() -> Option<CoreMainAction> {
 }
 
 fn import_config(path: &str) {
-    use hbb_common::{config::*, get_exe_time, get_modified_time};
+    use base::{config::*, get_exe_time, get_modified_time};
     let path2 = path.replace(".toml", "2.toml");
     let path2 = std::path::Path::new(&path2);
     let path = std::path::Path::new(path);

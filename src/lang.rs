@@ -1,4 +1,4 @@
-use hbb_common::regex::Regex;
+use base::regex::Regex;
 use std::ops::Deref;
 
 mod ar;
@@ -183,7 +183,7 @@ pub fn translate(name: String) -> String {
 
 pub fn translate_locale(name: String, locale: &str) -> String {
     let lang = resolve_lang(
-        &hbb_common::config::LocalConfig::get_option("lang"),
+        &base::config::LocalConfig::get_option("lang"),
         locale,
         cjk_ui_unavailable(),
     );

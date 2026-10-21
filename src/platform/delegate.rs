@@ -16,7 +16,7 @@ use objc::{
 };
 use sciter::{make_args, Host};
 
-use hbb_common::log;
+use base::log;
 
 static APP_HANDLER_IVAR: &str = "GoDeskAppHandler";
 

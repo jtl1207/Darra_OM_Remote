@@ -13,6 +13,16 @@ const double kDesktopRemoteTabBarHeight = 28.0;
 const int kInvalidWindowId = -1;
 const int kMainWindowId = 0;
 
+/// 连接产物常量单点(与 src/client/io_loop.rs 同步维护)。
+/// SessionHost 查找顺序: ① 本应用 exe 同目录 ② C:\DARRA\OM_CONSOLE\。
+const String kSessionHostExeName = 'Darra远程会话.exe';
+const List<String> kSessionHostSearchDirs = ['', r'C:\DARRA\OM_CONSOLE\'];
+const String kSessionHostStartPrefix = 'START ';
+
+/// 会话管理窗尺寸(聊天开/合)。
+const Size kConnectionManagerWindowSizeClosedChat = Size(300, 490);
+const Size kConnectionManagerWindowSizeOpenChat = Size(700, 490);
+
 const kAllDisplayValue = -1;
 
 const kKeyLegacyMode = 'legacy';
