@@ -20,9 +20,11 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'common.dart';
+import 'common/widgets/login_page.dart';
 import 'consts.dart';
 import 'mobile/pages/home_page.dart';
 import 'mobile/widgets/deploy_dialog.dart';
+import 'models/om_auth.dart';
 import 'models/platform_model.dart';
 
 /// Basic window and launch properties.
@@ -100,6 +102,8 @@ Future<void> initEnv(String appType) async {
   await initGlobalFFI();
   // await Firebase.initializeApp();
   _registerEventHandler();
+  // 恢复记住的登录; 未登录时主界面被 home 登录门挡住。
+  await OmAuth.instance.restore();
   // Update the system theme.
   updateSystemWindowTheme();
 }
@@ -369,11 +373,14 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           theme: MyTheme.lightTheme,
           darkTheme: MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
-          home: isDesktop
-              ? const DesktopTabPage()
-              : isWeb
-                  ? WebHomePage()
-                  : HomePage(),
+          home: Obx(() {
+            if (!OmAuth.instance.isLoggedIn) return const LoginPage();
+            return isDesktop
+                ? const DesktopTabPage()
+                : isWeb
+                    ? WebHomePage()
+                    : HomePage();
+          }),
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,

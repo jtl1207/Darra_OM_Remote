@@ -4,9 +4,11 @@ import 'package:bot_toast/bot_toast.dart';
 import 'package:dynamic_layouts/dynamic_layouts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
+import 'package:flutter_hbb/common/widgets/peer_card.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/desktop/widgets/popup_menu.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
+import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
@@ -185,9 +187,84 @@ class _AddressBookState extends State<AddressBook> {
     return Expanded(
       child: Align(
           alignment: Alignment.topLeft,
-          child: AddressBookPeersView(
-            menuPadding: widget.menuPadding,
-          )),
+          child: Obx(() => gFFI.abModel.groupByTag.value
+              ? _buildGroupedPeers()
+              : AddressBookPeersView(
+                  menuPadding: widget.menuPadding,
+                ))),
+    );
+  }
+
+  /// 按 tag 分组渲染设备列表；每台设备只出现在首个命中分组，避免重复行。
+  /// 受左侧选中 tag 筛选（与 AddressBookPeersView 同口径），组头可点快速筛选。
+  Widget _buildGroupedPeers() {
+    final selected = gFFI.abModel.selectedTags.toList();
+    final order = <String>[];
+    final groups = <String, List<Peer>>{};
+    for (final p in gFFI.abModel.currentAbPeers) {
+      final pt = p.tags.map((e) => e.toString()).toList();
+      String? hit;
+      if (selected.isEmpty) {
+        hit = pt.isEmpty ? kUntagged : pt.first;
+      } else {
+        for (final t in pt) {
+          if (selected.contains(t)) {
+            hit = t;
+            break;
+          }
+        }
+        if (hit == null && pt.isEmpty && selected.contains(kUntagged)) {
+          hit = kUntagged;
+        }
+      }
+      if (hit == null) continue;
+      if (!groups.containsKey(hit)) {
+        groups[hit] = <Peer>[];
+        order.add(hit);
+      }
+      groups[hit]!.add(p);
+    }
+    if (gFFI.abModel.sortTags.value) order.sort();
+    return ListView(
+      children: [
+        for (final g in order) ...[
+          _buildGroupHeader(g, groups[g]!.length),
+          for (final p in groups[g]!)
+            Container(
+              height: 45,
+              child: AddressBookPeerCard(
+                  peer: p, menuPadding: widget.menuPadding),
+            ).marginOnly(bottom: 4.0),
+        ],
+      ],
+    );
+  }
+
+  /// tag 分组小节头：色点 + 名称 + 设备数，点按即只筛该 tag。
+  Widget _buildGroupHeader(String tag, int count) {
+    final color = gFFI.abModel.getCurrentAbTagColor(tag);
+    return InkWell(
+      onTap: () {
+        final selected = gFFI.abModel.selectedTags;
+        if (selected.length == 1 && selected.first == tag) {
+          gFFI.abModel.unsetSelectedTags();
+        } else {
+          selected.value = [tag];
+        }
+      },
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ).marginOnly(right: 6),
+          Text(tag,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+          const Spacer(),
+          Text('$count', style: TextStyle(color: color)),
+        ],
+      ).marginOnly(top: 4.0, bottom: 4.0, right: 8.0),
     );
   }
 
@@ -229,6 +306,25 @@ class _AddressBookState extends State<AddressBook> {
     );
   }
 
+  @protected
+  MenuEntryBase<String> groupMenuItem() {
+    final isOptFixed = isOptionFixed(groupAbTagOption);
+    return MenuEntrySwitch<String>(
+      switchType: SwitchType.scheckbox,
+      text: translate('Group by tag'),
+      getter: () async {
+        return shouldGroupAbTags();
+      },
+      setter: (bool v) async {
+        bind.mainSetLocalOption(
+            key: groupAbTagOption, value: v ? 'Y' : defaultOptionNo);
+        gFFI.abModel.groupByTag.value = v;
+      },
+      dismissOnClicked: true,
+      enabled: (!isOptFixed).obs,
+    );
+  }
+
   void _showMenu(RelativeRect pos) {
     final canWrite = gFFI.abModel.current.canWrite();
     final items = [
@@ -238,6 +334,9 @@ class _AddressBookState extends State<AddressBook> {
       if (gFFI.abModel.legacyMode.value)
         sortMenuItem(), // It's already sorted after pulling down
       filterMenuItem(),
+      groupMenuItem(),
+      if (gFFI.peerTabModel.multiSelectionMode)
+        getEntry(translate("Tag selected devices"), abTagSelected),
     ];
 
     mod_menu.showMenu(
@@ -474,6 +573,16 @@ class _AddressBookState extends State<AddressBook> {
         onCancel: close,
       );
     });
+  }
+
+  /// 多选批量打标入口：新 tag 落到当前选中设备（云端 TagSync 同步）。
+  void abTagSelected() async {
+    if (gFFI.peerTabModel.selectedPeers.isEmpty) {
+      BotToast.showText(
+          contentColor: Colors.red, text: translate('No peer selected'));
+      return;
+    }
+    abAddTag();
   }
 
   void abAddTag() async {

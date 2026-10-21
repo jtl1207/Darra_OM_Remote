@@ -8,6 +8,8 @@ import 'package:flutter_hbb/common/widgets/keyboard_shortcuts/page_body.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_keyboard_shortcuts_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
+import 'package:flutter_hbb/models/om_auth.dart';
+import 'package:flutter_hbb/models/om_tag_sync.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/shortcut_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -46,8 +48,11 @@ enum SettingsTabKey {
 class DesktopSettingPage extends StatefulWidget {
   final SettingsTabKey initialTabkey;
 
-  // 退出登录入口，待 darra-auth 接入后挂接实际注销逻辑
-  static Future<void> Function()? onLogout;
+  // 退出登录: 清登录态并回到登录页, 同时清 tag 内存态并停 SSE 订阅
+  static Future<void> Function()? onLogout = () async {
+    await OmAuth.instance.signOut();
+    TagSync.instance.reset();
+  };
   static final List<SettingsTabKey> tabKeys = [
     if (bind.mainGetBuildinOption(key: kOptionHideGeneralSetting) != 'Y')
       SettingsTabKey.general,

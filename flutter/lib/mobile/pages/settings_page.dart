@@ -11,6 +11,8 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../common.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
+import '../../models/om_auth.dart';
+import '../../models/om_tag_sync.dart';
 import '../../models/platform_model.dart';
 import '../../models/shortcut_model.dart';
 import 'home_page.dart';
@@ -35,10 +37,12 @@ const url = 'https://rustdesk.com/';
 class _SettingsState extends State<SettingsPage> {
   var _buildDate = "";
 
-  // 退出登录: 清除本地账号地址簿缓存
+  // 退出登录: 清登录态 + 本地账号地址簿缓存
   Future<void> _signOut() async {
     await bind.mainClearAb();
     showToast(translate('Successful'));
+    await OmAuth.instance.signOut();
+    TagSync.instance.reset();
     if (mounted) setState(() {});
   }
 
