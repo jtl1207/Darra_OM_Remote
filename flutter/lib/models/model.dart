@@ -1933,6 +1933,15 @@ class ViewStyle {
     );
   }
 
+  /// 视图样式归一: 会话未显式设置(空)时, 移动端补 [kRemoteViewStyleAdaptive]
+  /// (等比 contain, 不拉伸不裁切, 横竖屏自适应), 桌面保持空值走现状 1.0 缩放。
+  static String resolveStyle(String? raw) {
+    final s = raw ?? '';
+    if (s.isNotEmpty) return s;
+    final desktop = (isDesktop || isWebDesktop);
+    return desktop ? s : kRemoteViewStyleAdaptive;
+  }
+
   static int _double2Int(double v) => (v * 100).round().toInt();
 
   @override
@@ -2177,10 +2186,12 @@ class CanvasModel with ChangeNotifier {
   updateSize() => _size = getSize();
 
   updateViewStyle({refreshMousePos = true, notify = true}) async {
-    final style = await bind.sessionGetViewStyle(sessionId: sessionId);
-    if (style == null) {
+    final raw = await bind.sessionGetViewStyle(sessionId: sessionId);
+    if (raw == null) {
       return;
     }
+    // 未设置时移动端归一为 adaptive (等比 contain), 横竖屏切换重算即自动适配。
+    final style = ViewStyle.resolveStyle(raw);
 
     updateSize();
     final displayWidth = getDisplayWidth();

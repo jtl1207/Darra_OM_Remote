@@ -748,8 +748,9 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
 
 Future<List<TRadioMenu<String>>> toolbarViewStyle(
     BuildContext context, String id, FFI ffi) async {
-  final groupValue =
-      await bind.sessionGetViewStyle(sessionId: ffi.sessionId) ?? '';
+  // 归一后与渲染一致: 移动端未设置时显示 adaptive (等比 contain) 选中态。
+  final groupValue = ViewStyle.resolveStyle(
+      await bind.sessionGetViewStyle(sessionId: ffi.sessionId));
   void onChanged(String? value) async {
     if (value == null) return;
     bind
