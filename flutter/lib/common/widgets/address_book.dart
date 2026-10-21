@@ -24,6 +24,14 @@ import 'login.dart';
 
 final hideAbTagsPanel = false.obs;
 
+/// 「按 tag 分组」开关写回 (照 sort/filter 开关的 setLocalOption 写法):
+/// 关态固定写 'N', 配 shouldGroupAbTags「仅显式 'N' 为关」读口径;
+/// [onChanged] 可假注入 (单测不触碰 gFFI), 缺省同步 gFFI.abModel.groupByTag。
+Future<void> setGroupAbTagSwitch(bool on, {void Function(bool)? onChanged}) async {
+  await bind.mainSetLocalOption(key: groupAbTagOption, value: on ? 'Y' : 'N');
+  (onChanged ?? (v) => gFFI.abModel.groupByTag.value = v)(on);
+}
+
 class AddressBook extends StatefulWidget {
   final EdgeInsets? menuPadding;
   const AddressBook({Key? key, this.menuPadding}) : super(key: key);
@@ -299,18 +307,32 @@ class _AddressBookState extends State<AddressBook> {
   }
 
   Widget _buildTagHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
       children: [
-        Text(translate('Tags')),
-        Listener(
-            onPointerDown: (e) {
-              final x = e.position.dx;
-              final y = e.position.dy;
-              menuPos = RelativeRect.fromLTRB(x, y, x, y);
-            },
-            onPointerUp: (_) => _showMenu(menuPos),
-            child: build_more(context, invert: true)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(translate('Tags')),
+            Listener(
+                onPointerDown: (e) {
+                  final x = e.position.dx;
+                  final y = e.position.dy;
+                  menuPos = RelativeRect.fromLTRB(x, y, x, y);
+                },
+                onPointerUp: (_) => _showMenu(menuPos),
+                child: build_more(context, invert: true)),
+          ],
+        ),
+        // 「按 tag 分组」开关: 写 groupAbTagOption 本地选项 + 同步 groupByTag
+        Obx(() => Row(children: [
+              Checkbox(
+                value: gFFI.abModel.groupByTag.value,
+                onChanged: isOptionFixed(groupAbTagOption)
+                    ? null
+                    : (v) => setGroupAbTagSwitch(v ?? true),
+              ),
+              Expanded(child: Text(translate('Group by tag'))),
+            ])),
       ],
     );
   }
@@ -359,9 +381,60 @@ class _AddressBookState extends State<AddressBook> {
     return Expanded(
       child: Align(
           alignment: Alignment.topLeft,
-          child: AddressBookPeersView(
-            menuPadding: widget.menuPadding,
-          )),
+          child: Obx(() => gFFI.abModel.groupByTag.value
+              ? _buildGroupedPeers()
+              : AddressBookPeersView(
+                  menuPadding: widget.menuPadding,
+                ))),
+    );
+  }
+
+  /// 按 tag 分组渲染设备列表; 分组键与筛选走 [groupPeersByTag], 组内沿用原 peer 卡。
+  Widget _buildGroupedPeers() {
+    final groups = groupPeersByTag(
+        gFFI.abModel.currentAbPeers.toList(),
+        gFFI.abModel.selectedTags.toList(),
+        sortByTag: gFFI.abModel.sortTags.value);
+    return ListView(
+      children: [
+        for (final g in groups.keys) ...[
+          _buildGroupHeader(g, groups[g]!.length),
+          for (final p in groups[g]!)
+            Container(
+              height: 45,
+              child: AddressBookPeerCard(
+                  peer: p, menuPadding: widget.menuPadding),
+            ).marginOnly(bottom: 4.0),
+        ],
+      ],
+    );
+  }
+
+  /// tag 分组小节头: 色点 + 名称 + 设备数, 点按只筛该 tag (再点还原)。
+  Widget _buildGroupHeader(String tag, int count) {
+    final color = gFFI.abModel.getCurrentAbTagColor(tag);
+    return InkWell(
+      onTap: () {
+        final selected = gFFI.abModel.selectedTags;
+        if (selected.length == 1 && selected.first == tag) {
+          gFFI.abModel.unsetSelectedTags();
+        } else {
+          selected.value = [tag];
+        }
+      },
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ).marginOnly(right: 6),
+          Text(tag,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+          const Spacer(),
+          Text('$count', style: TextStyle(color: color)),
+        ],
+      ).marginOnly(top: 4.0, bottom: 4.0, right: 8.0),
     );
   }
 

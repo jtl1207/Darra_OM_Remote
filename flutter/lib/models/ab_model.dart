@@ -6,6 +6,9 @@ import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/model.dart';
+import 'package:flutter_hbb/models/om_api.dart';
+import 'package:flutter_hbb/models/om_auth.dart';
+import 'package:flutter_hbb/models/om_tag_sync.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
@@ -27,6 +30,12 @@ bool shouldSortTags() {
 final filterAbTagOption = 'filter-ab-by-intersection';
 bool filterAbTagByIntersection() {
   return bind.mainGetLocalOption(key: filterAbTagOption) == 'Y';
+}
+
+// 按 tag 分组展示设备列表的开关, 默认开: 仅当本地选项显式存 'N' 才关
+final groupAbTagOption = 'group-ab-by-tag';
+bool shouldGroupAbTags() {
+  return bind.mainGetLocalOption(key: groupAbTagOption) != 'N';
 }
 
 const _personalAddressBookName = "My address book";
@@ -64,6 +73,7 @@ class AbModel {
 
   final sortTags = shouldSortTags().obs;
   final filterByIntersection = filterAbTagByIntersection().obs;
+  final groupByTag = shouldGroupAbTags().obs;
 
   var _syncAllFromRecent = true;
   var _syncFromRecentLock = false;
@@ -120,8 +130,11 @@ class AbModel {
   Future<void> pullAb(
       {required ForcePullAb? force, required bool quiet}) async {
     if (bind.isDisableAb()) return;
-    if (!gFFI.userModel.isLogin) return;
-    if (gFFI.userModel.networkError.isNotEmpty) return;
+    // OM 控制端: OmAuth 登录即可拉取 om-master 设备清单, 不走 rustdesk 账号门
+    if (!OmAuth.instance.isLoggedIn) {
+      if (!gFFI.userModel.isLogin) return;
+      if (gFFI.userModel.networkError.isNotEmpty) return;
+    }
     if (_pulling) return;
     if (force == null && _pulledOnce) {
       return;
@@ -143,6 +156,11 @@ class AbModel {
       {required ForcePullAb? force, required bool quiet}) async {
     if (force == null && listInitialized && current.initialized) return;
     debugPrint("pullAb, force: $force, quiet: $quiet");
+    // OM 控制端: 设备清单数据源 = om-master, 不走 rustdesk 账号 API
+    if (OmAuth.instance.isLoggedIn) {
+      await _pullAbFromOm(quiet: quiet);
+      return;
+    }
     if (!listInitialized || force == ForcePullAb.listAndCurrent) {
       try {
         // Read personal guid every time to avoid upgrading the server without closing the main window
@@ -211,6 +229,27 @@ class AbModel {
         debugPrint("pull current Ab error: $e");
       }
     }
+    _callbackPeerUpdate();
+    if (listInitialized && current.initialized) {
+      _saveCache();
+    }
+  }
+
+  /// OM 模式拉取: 只保留本地簿结构, 设备清单由 pullFromOm 从 om-master 整表替换。
+  Future<void> _pullAbFromOm({required bool quiet}) async {
+    addressbooks.removeWhere((key, value) => key != _legacyAddressBookName);
+    if (!addressbooks.containsKey(_legacyAddressBookName)) {
+      addressbooks[_legacyAddressBookName] = LegacyAb();
+    }
+    legacyMode.value = true;
+    if (!listInitialized) {
+      listInitialized = true;
+      trySetCurrentToLast();
+    }
+    if (!addressbooks.containsKey(_currentName.value)) {
+      _currentName.value = _legacyAddressBookName;
+    }
+    await current.pullAb(quiet: quiet);
     _callbackPeerUpdate();
     if (listInitialized && current.initialized) {
       _saveCache();
@@ -900,9 +939,16 @@ abstract class BaseAb {
     initialized = false;
     debugPrint("pull ab \"${name()}\"");
     try {
-      initialized = await pullAbImpl(quiet: quiet);
+      if (OmAuth.instance.isLoggedIn) {
+        // OM 控制端: 设备清单数据源 = om-master, 整表替换本簿
+        await pullFromOm();
+        initialized = true;
+      } else {
+        initialized = await pullAbImpl(quiet: quiet);
+      }
     } catch (e) {
       debugPrint("Error occurred while pulling address book: $e");
+      pullError.value = e.toString();
     } finally {
       abLoading.value = false;
       abPulling = false;
@@ -910,6 +956,34 @@ abstract class BaseAb {
   }
 
   Future<bool> pullAbImpl({quiet = false});
+
+  /// 设备清单数据源 = OM 云端 GET /api/om/devices, 整表替换本簿 peers/tags。
+  Future<void> pullFromOm() async {
+    final token = OmAuth.instance.accessToken ?? '';
+    if (token.isEmpty) throw StateError('not logged in');
+    final devices = await listOmDevices(token);
+    TagSync.instance.absorbFromDevices(devices);
+    // 订阅云端 tag 变更推送, 幂等: 内部先断旧连接再起新连接
+    TagSync.instance.startSse(token);
+    peers.value = devices.map(peerFromOmDevice).toList();
+    absorbTagVocabulary();
+  }
+
+  /// 把 tag 改动同步到云端设备清单 (TagSync 乐观更新, 失败回滚), 失败写 pushError。
+  Future<bool> pushTagsToCloud(List<String> uids, List<String> tags) async {
+    var ok = true;
+    for (final uid in uids) {
+      if (!await TagSync.instance.setTags(uid, tags)) ok = false;
+    }
+    if (!ok) pushError.value = translate('push_ab_failed_tip');
+    absorbTagVocabulary();
+    return ok;
+  }
+
+  /// 合并云端 tag 词表进本地词表。
+  void absorbTagVocabulary() {
+    tags.value = <String>{...tags, ...TagSync.instance.allTags}.toList()..sort();
+  }
 
   Future<String?> addPeers(List<Map<String, dynamic>> ps);
   removeHash(Map<String, dynamic> p) {
@@ -1139,12 +1213,15 @@ class LegacyAb extends BaseAb {
 
   @override
   Future<bool> changeTagForPeers(List<String> ids, List<dynamic> tags) async {
+    final tagList = tags.map((e) => e.toString()).toList();
+    // tag 双向同步: 整组替换写回云端 (TagSync 乐观更新, 失败回滚)
+    final ok = await pushTagsToCloud(ids, tagList);
     peers.map((e) {
       if (ids.contains(e.id)) {
-        e.tags = tags;
+        e.tags = tagList;
       }
     }).toList();
-    return await pushAb();
+    return await pushAb() && ok;
   }
 
   @override
@@ -1246,7 +1323,25 @@ class LegacyAb extends BaseAb {
         tagColors[e] = str2color2(e, existing: tagColors.values.toList()).value;
       }
     }
-    return await pushAb();
+    // 词表新建的 tag 同步打到当前多选设备上（仅多选模式生效）
+    var ok = true;
+    final selected = gFFI.peerTabModel.multiSelectionMode
+        ? gFFI.peerTabModel.selectedPeers
+        : const <Peer>[];
+    for (final t in tagList) {
+      if (selected.isEmpty) break;
+      final uids = selected.map((e) => e.id).toList();
+      if (await TagSync.instance.addTagToDevices(uids, t)) {
+        for (final p in selected) {
+          if (!p.tags.contains(t)) p.tags.add(t);
+        }
+      } else {
+        ok = false;
+        pushError.value = translate('push_ab_failed_tip');
+      }
+    }
+    absorbTagVocabulary();
+    return await pushAb() && ok;
   }
 
   @override
@@ -1277,7 +1372,15 @@ class LegacyAb extends BaseAb {
       tagColors.remove(oldTag);
       tagColors.addAll({newTag: oldColor});
     }
-    return await pushAb();
+    // 云端: 含该 tag 的设备写回改名后的 tag 列表
+    var ok = true;
+    for (final p in peers.where((e) => e.tags.contains(newTag))) {
+      final list = p.tags.map((e) => e.toString()).toList();
+      if (!await TagSync.instance.setTags(p.id, list)) ok = false;
+    }
+    if (!ok) pushError.value = translate('push_ab_failed_tip');
+    absorbTagVocabulary();
+    return await pushAb() && ok;
   }
 
   @override
@@ -1291,6 +1394,15 @@ class LegacyAb extends BaseAb {
   @override
   Future<bool> deleteTag(String tag) async {
     gFFI.abModel.selectedTags.remove(tag);
+    // 云端: 从所有含该 tag 的设备上移除
+    final holders =
+        peers.where((e) => e.tags.contains(tag)).map((e) => e.id).toList();
+    var ok = true;
+    if (holders.isNotEmpty &&
+        !await TagSync.instance.removeTagFromDevices(holders, tag)) {
+      ok = false;
+      pushError.value = translate('push_ab_failed_tip');
+    }
     tags.removeWhere((element) => element == tag);
     tagColors.remove(tag);
     for (var peer in peers) {
@@ -1301,7 +1413,8 @@ class LegacyAb extends BaseAb {
         peer.tags.remove(tag);
       }
     }
-    return await pushAb();
+    absorbTagVocabulary();
+    return await pushAb() && ok;
   }
 
 // #endregion
@@ -2028,4 +2141,48 @@ String _jsonDecodeActionResp(http.Response resp) {
 // https://github.com/seanmonstar/reqwest/issues/838
 void _setEmptyBody(Map<String, String> headers) {
   headers['Content-Length'] = '0';
+}
+
+/// OM 设备条目 → 地址簿 Peer（uid/名称/在线态/tags）。
+Peer peerFromOmDevice(OmDeviceData d) {
+  return Peer.fromJson({'id': d.uid, 'alias': d.name, 'tags': d.tags})
+    ..online = d.online;
+}
+
+/// om-master 设备清单拉取（OmApi 无状态, token 显式传入）。
+Future<List<OmDeviceData>> listOmDevices(String token) =>
+    OmApi().listDevices(token);
+
+/// 按 tag 分组筛选: 组序按首个命中出现, 每台设备只归首个命中组, 避免重复行。
+/// 无 tag 设备归 [kUntagged] 组; [selectedTags] 为空表示不过滤。
+Map<String, List<Peer>> groupPeersByTag(
+    List<Peer> peers, List<String> selectedTags,
+    {bool sortByTag = false}) {
+  final order = <String>[];
+  final groups = <String, List<Peer>>{};
+  for (final p in peers) {
+    final pt = p.tags.map((e) => e.toString()).toList();
+    String? hit;
+    if (selectedTags.isEmpty) {
+      hit = pt.isEmpty ? kUntagged : pt.first;
+    } else {
+      for (final t in pt) {
+        if (selectedTags.contains(t)) {
+          hit = t;
+          break;
+        }
+      }
+      if (hit == null && pt.isEmpty && selectedTags.contains(kUntagged)) {
+        hit = kUntagged;
+      }
+    }
+    if (hit == null) continue;
+    if (!groups.containsKey(hit)) {
+      groups[hit] = <Peer>[];
+      order.add(hit);
+    }
+    groups[hit]!.add(p);
+  }
+  if (sortByTag) order.sort();
+  return {for (final g in order) g: groups[g]!};
 }
