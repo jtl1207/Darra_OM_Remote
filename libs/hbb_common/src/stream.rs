@@ -11,6 +11,66 @@ pub enum Stream {
     WebRTC(webrtc::WebRTCStream),
     WebSocket(websocket::WsFramedStream),
     Tcp(tcp::FramedStream),
+    Durt(DurtStream),
+}
+
+/// DURT 会话通道：本变体不自带传输, 只持有引擎侧的一对通道。
+/// 出站 rustdesk Message 序列化字节写入 tx, 由 src/durt/ 引擎翻译成 DURT record 发出;
+/// 入站由引擎把 DURT record/媒体 datagram 翻译成 Message 字节推入 rx。
+pub struct DurtStream {
+    pub tx: tokio::sync::mpsc::UnboundedSender<bytes::Bytes>,
+    pub rx: tokio::sync::mpsc::UnboundedReceiver<Result<bytes::BytesMut, std::io::Error>>,
+    pub local: SocketAddr,
+}
+
+impl DurtStream {
+    /// 由 src/durt/ 引擎建好收发通道后包装成 DURT 承载。
+    pub fn new(
+        tx: tokio::sync::mpsc::UnboundedSender<bytes::Bytes>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<Result<bytes::BytesMut, std::io::Error>>,
+        local: SocketAddr,
+    ) -> Self {
+        Self { tx, rx, local }
+    }
+
+    /// 出站字节进引擎通道, 对端已关时如实报错。
+    #[inline]
+    pub async fn send_bytes(&mut self, bytes: bytes::Bytes) -> ResultType<()> {
+        if self.tx.send(bytes).is_err() {
+            bail!("durt session channel closed");
+        }
+        Ok(())
+    }
+
+    /// 原始字节出站: DURT 自带 mTLS, 不叠加 secretbox, 直接进通道。
+    #[inline]
+    pub async fn send_raw(&mut self, msg: Vec<u8>) -> ResultType<()> {
+        self.send_bytes(bytes::Bytes::from(msg)).await
+    }
+
+    /// send message
+    #[inline]
+    pub async fn send(&mut self, msg: &impl protobuf::Message) -> ResultType<()> {
+        self.send_raw(msg.write_to_bytes()?).await
+    }
+
+    /// receive message: 引擎推入的入站帧; 通道关 = None。
+    #[inline]
+    pub async fn next(&mut self) -> Option<Result<bytes::BytesMut, std::io::Error>> {
+        self.rx.recv().await
+    }
+
+    /// 超时收一帧: 超时返回 None, 与 Tcp 分支一致。
+    #[inline]
+    pub async fn next_timeout(
+        &mut self,
+        ms: u64,
+    ) -> Option<Result<bytes::BytesMut, std::io::Error>> {
+        match tokio::time::timeout(std::time::Duration::from_millis(ms), self.rx.recv()).await {
+            Ok(res) => res,
+            Err(_) => None,
+        }
+    }
 }
 
 impl Stream {
@@ -21,6 +81,9 @@ impl Stream {
             Stream::WebRTC(s) => s.set_send_timeout(ms),
             Stream::WebSocket(s) => s.set_send_timeout(ms),
             Stream::Tcp(s) => s.set_send_timeout(ms),
+            Stream::Durt(_) => {
+                // DURT 通道无发送超时概念, 由 src/durt/ 引擎自管。
+            }
         }
     }
 
@@ -31,6 +94,9 @@ impl Stream {
             Stream::WebRTC(s) => s.set_raw(),
             Stream::WebSocket(s) => s.set_raw(),
             Stream::Tcp(s) => s.set_raw(),
+            Stream::Durt(_) => {
+                // DURT 侧自管分帧, 无"裸帧"模式可切。
+            }
         }
     }
 
@@ -47,6 +113,9 @@ impl Stream {
             Stream::WebRTC(s) => s.set_max_packet_length(n),
             Stream::WebSocket(s) => s.set_max_packet_length(n),
             Stream::Tcp(s) => s.codec_mut().set_max_packet_length(n),
+            Stream::Durt(_) => {
+                // 包长上限由 DURT 引擎侧自管, 本变体不设。
+            }
         }
     }
 
@@ -57,6 +126,7 @@ impl Stream {
             Stream::WebRTC(s) => s.send_bytes(bytes).await,
             Stream::WebSocket(s) => s.send_bytes(bytes).await,
             Stream::Tcp(s) => s.send_bytes(bytes).await,
+            Stream::Durt(s) => s.send_bytes(bytes).await,
         }
     }
 
@@ -67,6 +137,7 @@ impl Stream {
             Stream::WebRTC(s) => s.send_raw(bytes).await,
             Stream::WebSocket(s) => s.send_raw(bytes).await,
             Stream::Tcp(s) => s.send_raw(bytes).await,
+            Stream::Durt(s) => s.send_raw(bytes).await,
         }
     }
 
@@ -77,6 +148,9 @@ impl Stream {
             Stream::WebRTC(s) => s.set_key(key),
             Stream::WebSocket(s) => s.set_key(key),
             Stream::Tcp(s) => s.set_key(key),
+            Stream::Durt(_) => {
+                // DURT 自带 P-384 mTLS, 不叠加 secretbox。
+            }
         }
     }
 
@@ -100,6 +174,7 @@ impl Stream {
                 Stream::WebRTC(_) => bail!("key exchange version 1 does not apply to WebRTC"),
                 Stream::WebSocket(s) => s.set_key_split(key, is_initiator, t),
                 Stream::Tcp(s) => s.set_key_split(key, is_initiator, t),
+                Stream::Durt(_) => bail!("key exchange version 1 does not apply to DURT"),
             },
             v => bail!("unsupported key exchange version {}", v),
         }
@@ -120,6 +195,7 @@ impl Stream {
         match self {
             #[cfg(feature = "webrtc")]
             Stream::WebRTC(s) => Some(s.rx_progress()),
+            Stream::Durt(_) => None,
             #[allow(unreachable_patterns)]
             _ => None,
         }
@@ -136,6 +212,7 @@ impl Stream {
         match self {
             #[cfg(feature = "webrtc")]
             Stream::WebRTC(s) => s.is_disconnected(),
+            Stream::Durt(_) => false,
             #[allow(unreachable_patterns)]
             _ => false,
         }
@@ -148,6 +225,8 @@ impl Stream {
             Stream::WebRTC(s) => s.is_secured(),
             Stream::WebSocket(s) => s.is_secured(),
             Stream::Tcp(s) => s.is_secured(),
+            // DURT 是 P-384 mTLS 会话, 永远安全。
+            Stream::Durt(_) => true,
         }
     }
 
@@ -158,6 +237,7 @@ impl Stream {
         match self {
             #[cfg(feature = "webrtc")]
             Stream::WebRTC(_) => true,
+            Stream::Durt(_) => false,
             #[allow(unreachable_patterns)]
             _ => false,
         }
@@ -180,6 +260,9 @@ impl Stream {
         match self {
             #[cfg(feature = "webrtc")]
             Stream::WebRTC(s) => s.close_detached(),
+            Stream::Durt(_) => {
+                // DURT 会话生命周期由 src/durt/ 引擎自管, 无需显式关闭。
+            }
             #[allow(unreachable_patterns)]
             _ => {}
         }
@@ -194,6 +277,7 @@ impl Stream {
         match self {
             #[cfg(feature = "webrtc")]
             Stream::WebRTC(s) => s.is_relayed().await,
+            Stream::Durt(_) => None,
             #[allow(unreachable_patterns)]
             _ => None,
         }
@@ -207,6 +291,7 @@ impl Stream {
         match self {
             #[cfg(feature = "webrtc")]
             Stream::WebRTC(s) => s.is_remote_ipv6().await,
+            Stream::Durt(_) => None,
             #[allow(unreachable_patterns)]
             _ => None,
         }
@@ -227,6 +312,7 @@ impl Stream {
                     s.remote_dtls_fingerprint().await.ok()
                 }
             }
+            Stream::Durt(_) => None,
             #[allow(unreachable_patterns)]
             _ => None,
         }
@@ -242,6 +328,7 @@ impl Stream {
             Stream::WebRTC(s) => s.next_timeout(timeout).await,
             Stream::WebSocket(s) => s.next_timeout(timeout).await,
             Stream::Tcp(s) => s.next_timeout(timeout).await,
+            Stream::Durt(s) => s.next_timeout(timeout).await,
         }
     }
 
@@ -253,6 +340,7 @@ impl Stream {
             Self::WebRTC(s) => s.send(msg).await,
             Self::WebSocket(ws) => ws.send(msg).await,
             Self::Tcp(tcp) => tcp.send(msg).await,
+            Self::Durt(s) => s.send(msg).await,
         }
     }
 
@@ -264,6 +352,7 @@ impl Stream {
             Self::WebRTC(s) => s.next().await,
             Self::WebSocket(ws) => ws.next().await,
             Self::Tcp(tcp) => tcp.next().await,
+            Self::Durt(s) => s.next().await,
         }
     }
 
@@ -274,6 +363,7 @@ impl Stream {
             Self::WebRTC(s) => s.local_addr(),
             Self::WebSocket(ws) => ws.local_addr(),
             Self::Tcp(tcp) => tcp.local_addr(),
+            Self::Durt(s) => s.local,
         }
     }
 

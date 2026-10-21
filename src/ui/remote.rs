@@ -14,9 +14,7 @@ use sciter::{
     Value,
 };
 
-use hbb_common::{
-    allow_err, log, rendezvous_proto::ConnType,
-};
+use hbb_common::{allow_err, log, ConnType};
 use base::{
     fs::TransferJobMeta, message_proto::*,
 };

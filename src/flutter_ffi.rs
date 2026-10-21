@@ -15,7 +15,7 @@ use flutter_rust_bridge::{StreamSink, SyncReturn};
 use hbb_common::{
     config::{self, LocalConfig, PeerConfig, PeerInfoSerde},
     lazy_static, log,
-    rendezvous_proto::ConnType,
+    ConnType,
     ResultType,
 };
 use base::{
@@ -63,7 +63,6 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
         hbb_common::init_log(false, "");
         #[cfg(feature = "mediacodec")]
         scrap::mediacodec::check_mediacodec();
-        crate::common::test_rendezvous_server();
         crate::common::test_nat_type();
     }
     #[cfg(target_os = "ios")]
@@ -1046,27 +1045,11 @@ pub fn main_set_option(key: String, value: String) {
         );
     }
 
-    // If `is_allow_tls_fallback` and https proxy is used, we need to restart rendezvous mediator.
-    // No need to check if https proxy is used, because this option does not change frequently
-    // and restarting mediator is safe even https proxy is not used.
-    let is_allow_tls_fallback = key.eq(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK);
-    if is_allow_tls_fallback
-        || key.eq("custom-rendezvous-server")
-        || key.eq(keys::OPTION_ALLOW_WEBSOCKET)
-        || key.eq(keys::OPTION_DISABLE_UDP)
-        || key.eq("api-server")
-    {
-        if is_allow_tls_fallback {
-            hbb_common::tls::reset_tls_cache();
-        }
-        set_option(key, value.clone());
-        #[cfg(target_os = "android")]
-        crate::rendezvous_mediator::RendezvousMediator::restart();
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        crate::common::test_rendezvous_server();
-    } else {
-        set_option(key, value.clone());
+    // TLS 回退开关变化时清一次 TLS 缓存; 连接引擎已替换为 DURT, 不再有 rendezvous mediator 需要重启。
+    if key.eq(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK) {
+        hbb_common::tls::reset_tls_cache();
     }
+    set_option(key, value.clone());
 }
 
 pub fn main_get_options() -> String {
@@ -1184,7 +1167,7 @@ pub fn main_is_using_public_server() -> bool {
 }
 
 pub fn main_discover() {
-    discover();
+    log::error!("局域网发现已随 rendezvous 移除, 连接引擎已替换为 DURT");
 }
 
 pub fn main_get_api_server() -> String {
@@ -1600,7 +1583,7 @@ pub fn main_load_lan_peers() {
 }
 
 pub fn main_remove_discovered(id: String) {
-    remove_discovered(id);
+    log::error!("局域网发现已随 rendezvous 移除, 连接引擎已替换为 DURT, 忽略移除 {id}");
 }
 
 fn main_broadcast_message(data: &HashMap<&str, &str>) {
@@ -2171,7 +2154,7 @@ pub fn main_stop_service() {
     #[cfg(target_os = "android")]
     {
         config::Config::set_option("stop-service".into(), "Y".into());
-        crate::rendezvous_mediator::RendezvousMediator::restart();
+        log::info!("连接引擎已替换为 DURT, 无 rendezvous mediator 需要重启");
     }
 }
 
@@ -2179,8 +2162,7 @@ pub fn main_start_service() {
     #[cfg(target_os = "android")]
     {
         config::Config::set_option("stop-service".into(), "".into());
-        crate::rendezvous_mediator::reset_needs_deploy_notification();
-        crate::rendezvous_mediator::RendezvousMediator::restart();
+        log::info!("连接引擎已替换为 DURT, 无 rendezvous mediator 需要重启");
     }
 }
 
@@ -2216,9 +2198,7 @@ pub fn main_get_mouse_time() -> f64 {
 }
 
 pub fn main_wol(id: String) {
-    // TODO: move send_wol outside.
-    #[cfg(not(any(target_os = "ios")))]
-    crate::lan::send_wol(id)
+    log::error!("局域网唤醒已随 rendezvous 移除, 连接引擎已替换为 DURT, 忽略 WOL {id}");
 }
 
 pub fn main_create_shortcut(_id: String) {
@@ -2501,8 +2481,7 @@ pub fn cm_init() {
 /// * Should only be called in the main flutter window.
 /// * macOS only
 pub fn main_start_ipc_url_server() {
-    #[cfg(target_os = "macos")]
-    std::thread::spawn(move || crate::server::start_ipc_url_server());
+    log::error!("连接引擎已替换为 DURT, IPC URL 服务已随被控端 server 栈移除");
 }
 
 pub fn main_test_wallpaper(_second: u64) {
@@ -2712,12 +2691,9 @@ pub fn main_get_common(key: String) -> String {
     } else if key == "transfer-job-id" {
         return base::fs::get_next_job_id().to_string();
     } else if key == "is-remote-modify-enabled-by-control-permissions" {
-        return match is_remote_modify_enabled_by_control_permissions() {
-            Some(true) => "true",
-            Some(false) => "false",
-            None => "",
-        }
-        .to_string();
+        // Permission/control_permissions 被控端权限轨已随 hbbs 移除, 恒返回 None。
+        log::debug!("control_permissions 轨已随 hbbs 移除, is-remote-modify-enabled-by-control-permissions 恒为空");
+        return "".to_string();
     } else if key == "has-gnome-shortcuts-inhibitor-permission" {
         #[cfg(target_os = "linux")]
         return crate::platform::linux::has_gnome_shortcuts_inhibitor_permission().to_string();
@@ -2737,13 +2713,8 @@ pub fn main_get_common(key: String) -> String {
         return ui_interface::is_local_permanent_password_set().to_string();
     } else {
         if key.starts_with("download-data-") {
-            let id = key.replace("download-data-", "");
-            match crate::hbbs_http::downloader::get_download_data(&id) {
-                Ok(data) => serde_json::to_string(&data).unwrap_or_default(),
-                Err(e) => {
-                    format!("error:{}", e)
-                }
-            }
+            log::error!("连接引擎已替换为 DURT, hbbs 下载器已移除, download-data 不可用");
+            "error:连接引擎已替换为 DURT".to_owned()
         } else if let Some(release_page_url) = key.strip_prefix("verified-download-url-") {
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             {
@@ -2839,40 +2810,12 @@ pub fn main_set_common(_key: String, _value: String) {
     {
         use crate::updater::get_update_download_file_from_url;
         if _key == "download-new-version" {
-            let download_url = _value.clone();
             let event_key = "download-new-version".to_owned();
-            let data =
-                match crate::updater::verified_update_artifact_for_download_url(&download_url) {
-                    Ok(artifact) => {
-                        if let Some(download_file) =
-                            get_update_download_file_from_url(&artifact.url)
-                        {
-                            let options = crate::hbbs_http::downloader::DownloadOptions {
-                                expected_size: artifact.size,
-                                artifact_sha256: artifact.sha256,
-                            };
-                            match crate::hbbs_http::downloader::download_file(
-                                artifact.url,
-                                Some(download_file),
-                                options,
-                            ) {
-                                Ok(id) => HashMap::from([("name", event_key), ("id", id)]),
-                                Err(e) => {
-                                    HashMap::from([("name", event_key), ("error", e.to_string())])
-                                }
-                            }
-                        } else {
-                            HashMap::from([
-                                ("name", event_key),
-                                ("error", "Invalid download url".to_owned()),
-                            ])
-                        }
-                    }
-                    Err(e) => HashMap::from([
-                        ("name", event_key),
-                        ("error", format!("Failed to verify update metadata, {}", e)),
-                    ]),
-                };
+            log::error!("连接引擎已替换为 DURT, hbbs 下载器已移除, 无法下载新版本");
+            let data = HashMap::from([
+                ("name", event_key),
+                ("error", "连接引擎已替换为 DURT".to_owned()),
+            ]);
             let _res = flutter::push_global_event(
                 flutter::APP_TYPE_MAIN,
                 serde_json::ser::to_string(&data).unwrap_or("".to_owned()),
@@ -2931,9 +2874,9 @@ pub fn main_set_common(_key: String, _value: String) {
     }
 
     if _key == "remove-downloader" {
-        crate::hbbs_http::downloader::remove(&_value);
+        log::error!("连接引擎已替换为 DURT, hbbs 下载器已移除, 忽略 remove-downloader {_value}");
     } else if _key == "cancel-downloader" {
-        crate::hbbs_http::downloader::cancel(&_value);
+        log::error!("连接引擎已替换为 DURT, hbbs 下载器已移除, 忽略 cancel-downloader {_value}");
     }
 
     #[cfg(target_os = "linux")]
@@ -3005,8 +2948,6 @@ pub mod server_side {
         JNIEnv,
     };
 
-    use crate::start_server;
-
     #[no_mangle]
     pub unsafe extern "system" fn Java_ffi_FFI_startServer(
         env: JNIEnv,
@@ -3029,15 +2970,14 @@ pub mod server_side {
                 crate::read_custom_client(&custom_client_config);
             }
         }
-        std::thread::spawn(move || start_server(true));
+        log::error!("连接引擎已替换为 DURT, 被控端 server 栈已移除, 不再启动本地服务");
     }
 
     #[no_mangle]
     pub unsafe extern "system" fn Java_ffi_FFI_startService(_env: JNIEnv, _class: JClass) {
         log::debug!("startService from jvm");
         config::Config::set_option("stop-service".into(), "".into());
-        crate::rendezvous_mediator::reset_needs_deploy_notification();
-        crate::rendezvous_mediator::RendezvousMediator::restart();
+        log::info!("连接引擎已替换为 DURT, 无 rendezvous mediator 需要重启");
     }
 
     #[no_mangle]
@@ -3061,7 +3001,7 @@ pub mod server_side {
 
     #[no_mangle]
     pub unsafe extern "system" fn Java_ffi_FFI_refreshScreen(_env: JNIEnv, _class: JClass) {
-        crate::server::video_service::refresh()
+        log::error!("连接引擎已替换为 DURT, 被控端 video_service 已移除, 刷新屏幕不可用");
     }
 
     /// Close outgoing sessions when the UI goes away but the process may not,
@@ -3108,9 +3048,10 @@ pub mod server_side {
 
     #[no_mangle]
     pub unsafe extern "system" fn Java_ffi_FFI_isServiceClipboardEnabled(
-        env: JNIEnv,
+        _env: JNIEnv,
         _class: JClass,
     ) -> jboolean {
-        jboolean::from(crate::server::is_clipboard_service_ok())
+        log::error!("连接引擎已替换为 DURT, 被控端剪贴板服务已移除");
+        jboolean::from(false)
     }
 }

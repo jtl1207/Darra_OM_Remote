@@ -215,7 +215,7 @@ async fn resolve_target(target: &str) -> ResultType<SocketAddr> {
 
 /// The address of `target` a TCP connection reaches, the resolver's candidates tried in order until
 /// one answers: an AAAA the server refuses is passed over for its A record, which the order alone
-/// would not do. For the rendezvous registration and the punch reply, which live on what it picks.
+/// would not do.
 async fn test_target(target: &str) -> ResultType<SocketAddr> {
     if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(target)).await {
         if let Ok(addr) = s.peer_addr() {

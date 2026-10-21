@@ -17,9 +17,6 @@ pub fn start_tray() {
         }
     }
 
-    #[cfg(target_os = "linux")]
-    crate::server::check_zombie();
-
     allow_err!(make_tray());
 }
 
@@ -123,7 +120,13 @@ fn make_tray() -> hbb_common::ResultType<()> {
             // Do not use "xdg-open", it won't read the config.
             if crate::dbus::invoke_new_connection(crate::get_uri_prefix()).is_err() {
                 if let Ok(task) = crate::run_me::<&str>(vec![]) {
-                    crate::server::CHILD_PROCESS.lock().unwrap().push(task);
+                    // 用独立线程收割子进程，避免僵尸进程。
+                    std::thread::spawn(move || {
+                        let mut task = task;
+                        if let Err(err) = task.wait() {
+                            log::error!("wait UI process failed: {}", err);
+                        }
+                    });
                 }
             }
         }

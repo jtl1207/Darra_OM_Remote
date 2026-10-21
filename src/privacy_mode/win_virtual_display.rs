@@ -522,7 +522,6 @@ impl PrivacyMode for PrivacyModeImpl {
     ) -> ResultType<()> {
         self.check_off_conn_id(conn_id)?;
         super::win_input::unhook()?;
-        let _tmp_ignore_changed_holder = crate::display_service::temp_ignore_displays_changed();
         self.restore();
         // We need to force restore the registry connectivity.
         // This is because the registry connection may be changed by `self.restore()`, but will not be fully restored.

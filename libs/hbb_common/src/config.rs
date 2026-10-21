@@ -41,7 +41,6 @@ use crate::{
     },
 };
 
-pub const RENDEZVOUS_TIMEOUT: u64 = 12_000;
 pub const CONNECT_TIMEOUT: u64 = 18_000;
 pub const READ_TIMEOUT: u64 = 18_000;
 // https://github.com/quic-go/quic-go/issues/525#issuecomment-294531351
@@ -66,9 +65,6 @@ lazy_static::lazy_static! {
     static ref LOCAL_CONFIG: RwLock<LocalConfig> = RwLock::new(LocalConfig::load());
     static ref STATUS: RwLock<Status> = RwLock::new(Status::load());
     static ref TRUSTED_DEVICES: RwLock<(Vec<TrustedDevice>, bool)> = Default::default();
-    static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
-    pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
-    pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
     pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
@@ -114,14 +110,7 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];
-pub const RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
-
-pub const RENDEZVOUS_PORT: i32 = 21116;
-pub const RELAY_PORT: i32 = 21117;
-pub const WS_RENDEZVOUS_PORT: i32 = 21118;
-pub const WS_RELAY_PORT: i32 = 21119;
-
+#[inline]
 #[inline]
 pub fn is_service_ipc_postfix(postfix: &str) -> bool {
     // `_service` is a protected cross-user IPC channel used by the root service.
@@ -238,8 +227,6 @@ pub struct Socks5Server {
 // more variable configs
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Config2 {
-    #[serde(default, deserialize_with = "deserialize_string")]
-    rendezvous_server: String,
     #[serde(default, deserialize_with = "deserialize_i32")]
     nat_type: i32,
     #[serde(default, deserialize_with = "deserialize_i32")]
@@ -449,11 +436,6 @@ pub struct TransferSerde {
     pub write_jobs: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_vec_string")]
     pub read_jobs: Vec<String>,
-}
-
-#[inline]
-pub fn get_online_state() -> i64 {
-    *ONLINE.lock().unwrap().values().max().unwrap_or(&0)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -904,81 +886,6 @@ impl Config {
             SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
         } else {
             SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
-        }
-    }
-
-    pub fn get_rendezvous_server() -> String {
-        let mut rendezvous_server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
-        if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_option("custom-rendezvous-server");
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = CONFIG2.read().unwrap().rendezvous_server.clone();
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_rendezvous_servers()
-                .drain(..)
-                .next()
-                .unwrap_or_default();
-        }
-        if !rendezvous_server.contains(':') {
-            rendezvous_server = format!("{rendezvous_server}:{RENDEZVOUS_PORT}");
-        }
-        rendezvous_server
-    }
-
-    pub fn get_rendezvous_servers() -> Vec<String> {
-        let s = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
-        if !s.is_empty() {
-            return vec![s];
-        }
-        let s = Self::get_option("custom-rendezvous-server");
-        if !s.is_empty() {
-            return vec![s];
-        }
-        let s = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
-        if !s.is_empty() {
-            return vec![s];
-        }
-        let serial_obsolute = CONFIG2.read().unwrap().serial > SERIAL;
-        if serial_obsolute {
-            let ss: Vec<String> = Self::get_option("rendezvous-servers")
-                .split(',')
-                .filter(|x| x.contains('.'))
-                .map(|x| x.to_owned())
-                .collect();
-            if !ss.is_empty() {
-                return ss;
-            }
-        }
-        return RENDEZVOUS_SERVERS.iter().map(|x| x.to_string()).collect();
-    }
-
-    pub fn reset_online() {
-        *ONLINE.lock().unwrap() = Default::default();
-    }
-
-    pub fn update_latency(host: &str, latency: i64) {
-        ONLINE.lock().unwrap().insert(host.to_owned(), latency);
-        let mut host = "".to_owned();
-        let mut delay = i64::MAX;
-        for (tmp_host, tmp_delay) in ONLINE.lock().unwrap().iter() {
-            if tmp_delay > &0 && tmp_delay < &delay {
-                delay = *tmp_delay;
-                host = tmp_host.to_string();
-            }
-        }
-        if !host.is_empty() {
-            let mut config = CONFIG2.write().unwrap();
-            if host != config.rendezvous_server {
-                log::debug!("Update rendezvous_server in config to {}", host);
-                log::debug!("{:?}", *ONLINE.lock().unwrap());
-                config.rendezvous_server = host;
-                config.store();
-            }
         }
     }
 
@@ -2871,7 +2778,6 @@ pub mod keys {
     pub const OPTION_ALLOW_WEBSOCKET: &str = "allow-websocket";
     pub const OPTION_TRACKPAD_SPEED: &str = "trackpad-speed";
     pub const OPTION_REGISTER_DEVICE: &str = "register-device";
-    pub const OPTION_RELAY_SERVER: &str = "relay-server";
     pub const OPTION_ICE_SERVERS: &str = "ice-servers";
     pub const OPTION_ALLOW_INSECURE_TLS_FALLBACK: &str = "allow-insecure-tls-fallback";
     pub const OPTION_ALLOW_WEBRTC_CC: &str = "allow-webrtc-congestion-control";

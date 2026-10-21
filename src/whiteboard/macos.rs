@@ -64,14 +64,13 @@ fn set_window_properties(window: &Arc<Window>) -> ResultType<()> {
 
 fn create_windows(event_loop: &EventLoop<(String, CustomEvent)>) -> ResultType<Vec<WindowState>> {
     let mut windows = Vec::new();
-    let map_display_origins: HashMap<_, _> = crate::server::display_service::try_get_displays()?
+    let map_display_origins: HashMap<_, _> = scrap::Display::all()?
         .into_iter()
         .map(|display| (display.name(), display.origin()))
         .collect();
-    // We can't use `crate::server::display_service::try_get_displays()` here.
-    // Because the `display` returned by `crate::server::display_service::try_get_displays()`:
-    // 1. `display.origin()` is the logic position.
-    // 2. `display.width()` and `display.height()` are the physical size.
+    // scrap::Display 不能直接用来定窗口大小:
+    // 1. `display.origin()` 是逻辑坐标。
+    // 2. `display.width()` 和 `display.height()` 是物理尺寸。
     for monitor in event_loop.available_monitors() {
         let Some(origin) = map_display_origins.get(&monitor.native_id().to_string()) else {
             // unreachable!

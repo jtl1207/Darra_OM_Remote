@@ -2306,7 +2306,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.4",
 ]
 
 [[package]]
@@ -2435,6 +2435,35 @@ name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
+name = "durt-sidecar"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "durt-wire",
+ "env_logger 0.11.6",
+ "log",
+ "p256",
+ "p384",
+ "quiche",
+ "ring",
+ "serde 1.0.228",
+ "serde_json 1.0.118",
+ "sha2",
+ "subtle",
+ "thiserror 1.0.61",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "durt-wire"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "unicode-normalization",
+]
 
 [[package]]
 name = "dylib_virtual_display"
@@ -4138,6 +4167,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "intrusive-collections"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "189d0897e4cbe8c75efedf3502c18c887b05046e59d28404d4d8e46cbc4d1e86"
+dependencies = [
+ "memoffset 0.9.1",
+]
+
+[[package]]
 name = "io-lifetimes"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4417,7 +4455,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e310b3a6b5907f99202fcdb4960ff45b93735d7c7d96b760fcff8db2dc0e103d"
 dependencies = [
  "cfg-if 1.0.0",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5649,6 +5687,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "octets"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d59d30d3ad7f7e1c9a66e51c9cb71ae1c794b28ffe7053fd785defb0d180069"
+
+[[package]]
 name = "oid-registry"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6437,6 +6481,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "quiche"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28e5a763fecb47867bd3720f69ec87031ff42fda1dc88be2cb5fbb3a558fa5e4"
+dependencies = [
+ "cmake",
+ "either",
+ "intrusive-collections",
+ "libc",
+ "libm",
+ "log",
+ "octets",
+ "once_cell",
+ "ring",
+ "slab",
+ "smallvec",
+ "winapi 0.3.9",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7103,6 +7167,8 @@ dependencies = [
  "default-net",
  "dispatch",
  "docopt",
+ "durt-sidecar",
+ "durt-wire",
  "enigo",
  "errno",
  "evdev",
@@ -7793,6 +7859,9 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+dependencies = [
+ "serde 1.0.228",
+]
 
 [[package]]
 name = "smithay-client-toolkit"

@@ -1,8 +1,5 @@
 use super::{Cursor, CustomEvent};
-use crate::{
-    ipc::{self, Data},
-    CHILD_PROCESS,
-};
+use crate::ipc::{self, Data};
 use hbb_common::{
     allow_err,
     anyhow::anyhow,
@@ -182,16 +179,15 @@ async fn start_whiteboard_() -> ResultType<()> {
                 log::error!("Failed to run whiteboard: {res:?}");
                 sleep(1.).await;
             }
-            if let Some(task) = res? {
-                CHILD_PROCESS.lock().unwrap().push(task);
-            }
+            // 只校验拉起结果, 子进程句柄不托管。
+            let _ = res?;
             run_done = true;
         } else {
             run_done = false;
         }
         if !run_done {
             log::debug!("Start whiteboard");
-            CHILD_PROCESS.lock().unwrap().push(crate::run_me(args)?);
+            crate::run_me(args)?;
         }
         for _ in 0..20 {
             sleep(0.3).await;

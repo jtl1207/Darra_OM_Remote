@@ -1,30 +1,22 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::clipboard::{clipboard_listener, update_clipboard, ClipboardSide};
 #[cfg(not(any(target_os = "ios")))]
-use crate::{audio_service, clipboard::CLIPBOARD_INTERVAL, ConnInner, CLIENT_SERVER};
+use crate::clipboard::CLIPBOARD_INTERVAL;
 use crate::{
     client::{
         self, new_voice_call_request, Client, Data, Interface, MediaData, MediaSender,
         QualityStatus, MILLI1, SEC30,
     },
-    common::get_default_sound_input,
     ui_session_interface::{InvokeUiSession, Session},
 };
 
 // Empirical no-data window before exposing the restart reconnect state to the UI.
 // Restart msgbox text is kept as a legacy UI fallback; Flutter handles the type as a control event.
 const RESTART_REMOTE_DEVICE_NO_DATA_TIMEOUT: Duration = Duration::from_secs(5);
-const KCP_CLOSE_REASON_FLUSH_DELAY: Duration = Duration::from_millis(30);
-// Deadline for the parting close-reason send once the peer is presumed gone; KCP waits for send
-// capacity with no deadline of its own.
-const KCP_CLOSE_REASON_GONE_DEADLINE: Duration = Duration::from_millis(500);
 // Grace after ICE reports Disconnected, which it does ~5s after it stops hearing from the peer,
 // for ~8s in total. Disconnected is transient by design, so this waits out a Wi-Fi roam or a
 // sleep/wake rather than acting on the first hint.
 const WEBRTC_SUSPECT_GRACE: Duration = Duration::from_secs(3);
-// KCP gets no such hint, only how long since a packet arrived; its endpoint pings an idle peer
-// about every 2s, so this is several missed pings, and matches the 8s WebRTC arrives at.
-const KCP_PEER_SILENCE_LIMIT: Duration = Duration::from_secs(8);
 #[cfg(feature = "unix-file-copy-paste")]
 use crate::{clipboard::try_empty_clipboard_files, clipboard_file::unix_file_clip};
 use base::{
@@ -41,14 +33,12 @@ use base::{
 ))]
 use clipboard::ContextSend;
 use crossbeam_queue::ArrayQueue;
-#[cfg(not(target_os = "ios"))]
-use hbb_common::tokio::sync::mpsc::error::TryRecvError;
 use hbb_common::{
     allow_err,
     config::{self, LocalConfig, PeerConfig, TransferSerde},
     get_time, log,
     protobuf::Message as _,
-    rendezvous_proto::ConnType,
+    ConnType,
     timeout,
     tokio::{
         self,
@@ -188,7 +178,7 @@ impl<T: InvokeUiSession> Remote<T> {
         } else if self.handler.is_terminal() {
             ConnType::TERMINAL
         } else {
-            ConnType::default()
+            ConnType::DEFAULT_CONN
         };
 
         match Client::start(
@@ -200,7 +190,7 @@ impl<T: InvokeUiSession> Remote<T> {
         )
         .await
         {
-            Ok(((mut peer, direct, pk, kcp, stream_type), (feedback, rendezvous_server))) => {
+            Ok(((mut peer, direct, pk, stream_type), _)) => {
                 self.handler
                     .connection_round_state
                     .lock()
@@ -222,9 +212,6 @@ impl<T: InvokeUiSession> Remote<T> {
                     && !client::confirm_insecure_connection(&self.handler, &mut self.receiver).await
                 {
                     self.send_close_reason(&mut peer, "").await;
-                    if kcp.is_some() {
-                        tokio::time::sleep(KCP_CLOSE_REASON_FLUSH_DELAY).await;
-                    }
                     self.handle_disconnected(round);
                     return;
                 }
@@ -264,11 +251,9 @@ impl<T: InvokeUiSession> Remote<T> {
                     crate::rustdesk_interval(time::interval(Duration::new(1, 0)));
                 let mut fps_instant = Instant::now();
 
-                let _keep_it = client::hc_connection(feedback, rendezvous_server, token).await;
                 let mut last_recv_time = Instant::now();
                 let mut webrtc_suspect_since: Option<Instant> = None;
                 let mut last_rx_progress = peer.rx_progress();
-                let mut peer_gone = false;
 
                 loop {
                     tokio::select! {
@@ -345,16 +330,11 @@ impl<T: InvokeUiSession> Remote<T> {
                             } else {
                                 webrtc_suspect_since = None;
                             }
-                            // Neither limit is a hard upper bound. A send is awaited inline in
-                            // this loop, so one in progress delays this tick - bounded on WebRTC
-                            // by the timeout the stream was built with, not bounded at all on
-                            // KCP. The 30s watchdog above shares the loop and the same delay.
-                            peer_gone = webrtc_suspect_since
-                                .map_or(false, |since| since.elapsed() >= WEBRTC_SUSPECT_GRACE)
-                                || kcp
-                                    .as_ref()
-                                    .and_then(|k| k.peer_silent_for())
-                                    .map_or(false, |silent| silent >= KCP_PEER_SILENCE_LIMIT);
+                            // Not a hard upper bound: a send is awaited inline in this loop,
+                            // so one in progress delays this tick - bounded by the timeout the
+                            // stream was built with. The 30s watchdog above shares the loop.
+                            let peer_gone = webrtc_suspect_since
+                                .map_or(false, |since| since.elapsed() >= WEBRTC_SUSPECT_GRACE);
                             if peer_gone {
                                 log::info!("Peer stopped answering, reconnecting");
                                 #[cfg(feature = "flutter")]
@@ -409,18 +389,6 @@ impl<T: InvokeUiSession> Remote<T> {
                 // Stop client audio server.
                 if let Some(s) = self.stop_voice_call_sender.take() {
                     s.send(()).ok();
-                }
-                if kcp.is_some() {
-                    // Attempted rather than skipped even here: if the loss was one-way the peer
-                    // does get it, and drops its side instead of waiting out its own timeout.
-                    if peer_gone {
-                        peer.set_send_timeout(KCP_CLOSE_REASON_GONE_DEADLINE.as_millis() as u64);
-                    }
-                    // Send the close reason if it hasn't been sent yet, as KCP cannot detect the socket close event.
-                    self.send_close_reason(&mut peer, "kcp").await;
-                    // KCP does not send messages immediately, so wait to ensure the last message is sent.
-                    // 1ms works in my test, but 30ms is more reliable.
-                    tokio::time::sleep(KCP_CLOSE_REASON_FLUSH_DELAY).await;
                 }
             }
             Err(err) => {
@@ -550,87 +518,11 @@ impl<T: InvokeUiSession> Remote<T> {
         }
     }
 
-    // Start a voice call recorder, records audio and send to remote
+    // 语音通话录音: 音频采集栈 (audio_service/CLIENT_SERVER) 已随旧服务端协议层退役,
+    // 且当前产品不提供音频 (durt.idl §audio), 通话不接录音采集。
     fn start_voice_call(&mut self) -> Option<std::sync::mpsc::Sender<()>> {
-        if self.handler.is_file_transfer()
-            || self.handler.is_port_forward()
-            || self.handler.is_terminal()
-        {
-            return None;
-        }
-        // iOS does not have this server.
-        #[cfg(not(any(target_os = "ios")))]
-        {
-            // NOTE:
-            // The client server and --server both use the same sound input device.
-            // It's better to distinguish the server side and client side.
-            // But it' not necessary for now, because it's not a common case.
-            // And it is immediately known when the input device is changed.
-            crate::audio_service::set_voice_call_input_device(get_default_sound_input(), false);
-            // Create a channel to receive error or closed message
-            let (tx, rx) = std::sync::mpsc::channel();
-            let (tx_audio_data, mut rx_audio_data) =
-                hbb_common::tokio::sync::mpsc::unbounded_channel();
-            // Create a stand-alone inner, add subscribe to audio service
-            let conn_id = CLIENT_SERVER.write().unwrap().get_new_id();
-            let client_conn_inner = ConnInner::new(conn_id.clone(), Some(tx_audio_data), None);
-            // now we subscribe
-            CLIENT_SERVER.write().unwrap().subscribe(
-                audio_service::NAME,
-                client_conn_inner.clone(),
-                true,
-            );
-            let tx_audio = self.sender.clone();
-            std::thread::spawn(move || {
-                loop {
-                    // check if client is closed
-                    match rx.try_recv() {
-                        Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            log::debug!("Exit voice call audio service of client");
-                            // unsubscribe
-                            CLIENT_SERVER.write().unwrap().subscribe(
-                                audio_service::NAME,
-                                client_conn_inner,
-                                false,
-                            );
-                            crate::audio_service::set_voice_call_input_device(None, true);
-                            break;
-                        }
-                        _ => {}
-                    }
-                    match rx_audio_data.try_recv() {
-                        Ok((_instant, msg)) => match &msg.union {
-                            Some(message::Union::AudioFrame(frame)) => {
-                                let mut msg = Message::new();
-                                msg.set_audio_frame(frame.clone());
-                                tx_audio.send(Data::Message(msg)).ok();
-                            }
-                            Some(message::Union::Misc(misc)) => {
-                                let mut msg = Message::new();
-                                msg.set_misc(misc.clone());
-                                tx_audio.send(Data::Message(msg)).ok();
-                            }
-                            _ => {}
-                        },
-                        Err(err) => {
-                            if err == TryRecvError::Empty {
-                                // ignore
-                            } else {
-                                log::debug!("Failed to record local audio channel: {}", err);
-                            }
-                            // Both arms fall through with nothing else in this loop blocking, so
-                            // without a pause the thread spun a core for the whole voice call.
-                            std::thread::sleep(std::time::Duration::from_millis(1));
-                        }
-                    }
-                }
-            });
-            return Some(tx);
-        }
-        #[cfg(target_os = "ios")]
-        {
-            None
-        }
+        log::warn!("语音通话录音未启用: 当前产品不提供音频采集");
+        None
     }
 
     async fn send_close_reason(&mut self, peer: &mut Stream, reason: &str) {

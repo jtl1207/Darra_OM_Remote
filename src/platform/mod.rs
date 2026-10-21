@@ -83,10 +83,7 @@ pub fn is_xfce() -> bool {
 }
 
 pub fn breakdown_callback() {
-    #[cfg(target_os = "linux")]
-    crate::input_service::clear_remapped_keycode();
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    crate::input_service::release_device_modifiers();
+    // 被控端输入服务已随 DURT 独立; 本地无输入注入残留可清理。
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

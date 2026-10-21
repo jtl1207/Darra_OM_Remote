@@ -208,10 +208,6 @@ impl UI {
         temporary_password()
     }
 
-    fn update_temporary_password(&self) {
-        update_temporary_password()
-    }
-
     fn set_permanent_password(&self, password: String) {
         let _ = set_permanent_password_with_result(password);
     }
@@ -285,7 +281,8 @@ impl UI {
     }
 
     fn using_public_server(&self) -> bool {
-        crate::using_public_server()
+        // rendezvous 公共服务器已移除, DURT 直连不存在公共服务器判定, 恒为 false
+        false
     }
 
     fn is_incoming_only(&self) -> bool {
@@ -401,7 +398,6 @@ impl UI {
     }
 
     fn closing(&mut self, x: i32, y: i32, w: i32, h: i32) {
-        crate::server::input_service::fix_key_down_timeout_at_exit();
         LocalConfig::set_size(x, y, w, h);
     }
 
@@ -482,14 +478,6 @@ impl UI {
         PeerConfig::remove(&id);
     }
 
-    fn remove_discovered(&mut self, id: String) {
-        remove_discovered(id);
-    }
-
-    fn send_wol(&mut self, id: String) {
-        crate::lan::send_wol(id)
-    }
-
     fn new_remote(&mut self, id: String, remote_type: String, force_relay: bool) {
         new_remote(id, remote_type, force_relay)
     }
@@ -566,27 +554,6 @@ impl UI {
         create_shortcut(_id)
     }
 
-    fn discover(&self) {
-        std::thread::spawn(move || {
-            allow_err!(crate::lan::discover());
-        });
-    }
-
-    fn get_lan_peers(&self) -> String {
-        // let peers = get_lan_peers()
-        //     .into_iter()
-        //     .map(|mut peer| {
-        //         (
-        //             peer.remove("id").unwrap_or_default(),
-        //             peer.remove("username").unwrap_or_default(),
-        //             peer.remove("hostname").unwrap_or_default(),
-        //             peer.remove("platform").unwrap_or_default(),
-        //         )
-        //     })
-        //     .collect::<Vec<(String, String, String, String)>>();
-        serde_json::to_string(&get_lan_peers()).unwrap_or_default()
-    }
-
     fn get_uuid(&self) -> String {
         get_uuid()
     }
@@ -605,22 +572,12 @@ impl UI {
         allow_err!(std::process::Command::new(p).arg(url).spawn());
     }
 
-    fn change_id(&self, id: String) {
-        reset_async_job_status();
-        let old_id = self.get_id();
-        change_id_shared(id, old_id);
-    }
-
     fn http_request(&self, url: String, method: String, body: Option<String>, header: String) {
         http_request(url, method, body, header)
     }
 
     fn post_request(&self, url: String, body: String, header: String) {
         post_request(url, body, header)
-    }
-
-    fn is_ok_change_id(&self) -> bool {
-        hbb_common::machine_uid::get().is_ok()
     }
 
     fn get_async_job_status(&self) -> String {
@@ -710,6 +667,7 @@ impl UI {
     }
 
     fn is_remote_modify_enabled_by_control_permissions(&self) -> String {
+        // 被控端权限轨已随 hbbs 移除，恒为未指定，由本地选项兜底。
         match crate::ui_interface::is_remote_modify_enabled_by_control_permissions() {
             Some(true) => "true",
             Some(false) => "false",
@@ -734,7 +692,6 @@ impl sciter::EventHandler for UI {
         fn is_disable_ab();
         fn get_id();
         fn temporary_password();
-        fn update_temporary_password();
         fn set_permanent_password(String);
         fn is_local_permanent_password_set();
         fn is_permanent_password_set();
@@ -743,9 +700,7 @@ impl sciter::EventHandler for UI {
         fn closing(i32, i32, i32, i32);
         fn get_size();
         fn new_remote(String, String, bool);
-        fn send_wol(String);
         fn remove_peer(String);
-        fn remove_discovered(String);
         fn get_connect_status();
         fn get_mouse_time();
         fn check_mouse_time();
@@ -798,13 +753,9 @@ impl sciter::EventHandler for UI {
         fn get_software_store_path();
         fn get_software_ext();
         fn open_url(String);
-        fn change_id(String);
         fn get_async_job_status();
         fn post_request(String, String, String);
-        fn is_ok_change_id();
         fn create_shortcut(String);
-        fn discover();
-        fn get_lan_peers();
         fn get_uuid();
         fn has_hwcodec();
         fn has_vram();

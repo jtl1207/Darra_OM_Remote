@@ -576,30 +576,6 @@ pub fn get_focused_display(displays: Vec<DisplayInfo>) -> Option<usize> {
 }
 
 pub fn get_cursor() -> ResultType<Option<u64>> {
-    // DRM/KMS capture: the hardware cursor arrives over the `_drm` stream, not from XFixes.
-    //
-    // The MEMOISED `is_x11()` here, deliberately, unlike the capture-path callers that take the
-    // unmemoised `scrap::is_x11()` because this one latches on first use. The tradeoff is the other
-    // way round at cursor cadence: the unmemoised form forks `loginctl` per call, and this runs on
-    // every cursor poll. A latch that guessed wrong costs a cursor served by the wrong source until
-    // the process restarts, not a capture that cannot start -- and by the time a cursor is being
-    // polled there is a live session, which is the case the latch reads correctly.
-    #[cfg(feature = "drm")]
-    if !is_x11() {
-        if let Some(id) = crate::server::drm_capturer::drm_cursor_id() {
-            // In a mixed DRM + PipeWire session the DRM streams only cover the DRM-backed displays;
-            // when the pointer sits on a PipeWire-served display every DRM stream reports the hidden
-            // sentinel. Returning that sentinel here would hide the cursor globally, including on the
-            // PipeWire display where it is still visible, so only report a hidden DRM cursor when it
-            // is authoritative -- a pure-DRM session. A visible DRM cursor is always authoritative;
-            // otherwise fall through to the normal cursor path.
-            if id != scrap::drm_reader::HIDDEN_CURSOR_ID
-                || !crate::server::display_service::has_non_drm_backed_display()
-            {
-                return Ok(Some(id));
-            }
-        }
-    }
     let mut res = None;
     DISPLAY.with(|conn| {
         if let Ok(d) = conn.try_borrow_mut() {
@@ -618,32 +594,6 @@ pub fn get_cursor() -> ResultType<Option<u64>> {
 }
 
 pub fn get_cursor_data(hcursor: u64) -> ResultType<CursorData> {
-    // DRM/KMS capture: return the latest hardware-cursor snapshot from the `_drm` stream. Its id may
-    // have advanced past `hcursor` between get_cursor() and here, so return the latest rather than
-    // bailing (which would trigger a MouseCursorService backoff).
-    //
-    // Memoised `is_x11()` on purpose, for the reason spelled out in `get_cursor()`; the two must
-    // agree anyway, since a caller that took the DRM branch there has to take it here.
-    #[cfg(feature = "drm")]
-    if !is_x11() {
-        if let Some(c) = crate::server::drm_capturer::drm_cursor() {
-            // See get_cursor(): a hidden DRM sentinel is authoritative only in a pure-DRM session. In
-            // a mixed DRM + PipeWire session fall through so the PipeWire display's cursor is served
-            // by the normal path instead of being hidden everywhere.
-            if c.id != scrap::drm_reader::HIDDEN_CURSOR_ID
-                || !crate::server::display_service::has_non_drm_backed_display()
-            {
-                let mut cd: CursorData = Default::default();
-                cd.id = c.id;
-                cd.width = c.width;
-                cd.height = c.height;
-                cd.hotx = c.hotx;
-                cd.hoty = c.hoty;
-                cd.colors = c.colors.into();
-                return Ok(cd);
-            }
-        }
-    }
     let mut res = None;
     DISPLAY.with(|conn| {
         if let Ok(ref mut d) = conn.try_borrow_mut() {
@@ -694,19 +644,6 @@ pub fn get_cursor_data(hcursor: u64) -> ResultType<CursorData> {
         Some(x) => Ok(x),
         _ => bail!("Failed to get cursor image of {}", hcursor),
     }
-}
-
-fn start_uinput_service() {
-    use crate::server::uinput::service;
-    std::thread::spawn(|| {
-        service::start_service_control();
-    });
-    std::thread::spawn(|| {
-        service::start_service_keyboard();
-    });
-    std::thread::spawn(|| {
-        service::start_service_mouse();
-    });
 }
 
 /// Suggests the best terminal type based on the environment.
@@ -1124,7 +1061,6 @@ fn force_stop_server() {
 pub fn start_os_service() {
     check_if_stop_service();
     stop_rustdesk_servers();
-    start_uinput_service();
 
     std::thread::spawn(|| {
         allow_err!(crate::ipc::start(crate::POSTFIX_SERVICE));

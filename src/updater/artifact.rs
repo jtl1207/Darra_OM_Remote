@@ -1,6 +1,5 @@
 use crate::{
     common::{display_version_from_release_id, release_id_from_update_url},
-    hbbs_http::create_http_client_with_url_strict,
     update_metadata::{UpdateArtifactQuery, UpdateMetadataRequirements, VerifiedUpdateArtifact},
 };
 use hbb_common::{bail, ResultType};
@@ -122,7 +121,9 @@ pub(super) fn verified_update_artifact_from_release_page_url(
 }
 
 fn fetch_update_sidecar_bytes(url: &str) -> ResultType<Vec<u8>> {
-    let client = create_http_client_with_url_strict(url)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(UPDATE_SIDECAR_HTTP_REQUEST_TIMEOUT)
+        .build()?;
     let mut response = client
         .get(url)
         .timeout(UPDATE_SIDECAR_HTTP_REQUEST_TIMEOUT)

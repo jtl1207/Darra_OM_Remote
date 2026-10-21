@@ -1,10 +1,8 @@
 pub mod compress;
-pub mod protos;
 pub use bytes;
 use config::Config;
 pub use futures;
 pub use protobuf;
-pub use protos::rendezvous as rendezvous_proto;
 use serde_derive::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -75,6 +73,24 @@ pub use libloading;
 pub use x11;
 
 pub type SessionID = uuid::Uuid;
+
+/// 连接类型（会话类别）。原位于 rendezvous.proto，协议层移除后保留为 Rust 枚举。
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConnType {
+    DEFAULT_CONN,
+    FILE_TRANSFER,
+    PORT_FORWARD,
+    RDP,
+    VIEW_CAMERA,
+    TERMINAL,
+}
+
+impl Default for ConnType {
+    fn default() -> Self {
+        Self::DEFAULT_CONN
+    }
+}
 
 #[inline]
 pub async fn sleep(sec: f32) {

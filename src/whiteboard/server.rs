@@ -114,7 +114,7 @@ async fn handle_new_stream(mut conn: Connection) {
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(super) fn get_displays_rect() -> ResultType<(i32, i32, u32, u32)> {
-    let displays = crate::server::display_service::try_get_displays()?;
+    let displays = scrap::Display::all()?;
     let mut min_x = i32::MAX;
     let mut min_y = i32::MAX;
     let mut max_x = i32::MIN;

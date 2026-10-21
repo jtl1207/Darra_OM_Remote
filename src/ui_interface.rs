@@ -3,12 +3,9 @@ use base::config::keys::{self, *};
 use hbb_common::password_security;
 use hbb_common::{
     allow_err,
-    bytes::Bytes,
-    config::{self, Config, LocalConfig, PeerConfig, CONNECT_TIMEOUT, RENDEZVOUS_PORT},
+    config::{self, Config, LocalConfig, PeerConfig},
     directories_next,
-    futures::future::join_all,
     log,
-    rendezvous_proto::*,
     tokio,
 };
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -25,12 +22,8 @@ use std::{
 };
 
 use crate::common::SOFTWARE_UPDATE_URL;
-#[cfg(feature = "flutter")]
-use crate::hbbs_http::account;
 #[cfg(not(any(target_os = "ios")))]
 use crate::ipc;
-
-type Message = RendezvousMessage;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub type Children = Arc<Mutex<(bool, HashMap<(String, String), Child>)>>;
@@ -70,7 +63,6 @@ lazy_static::lazy_static! {
     static ref ASYNC_JOB_STATUS : Arc<Mutex<String>> = Default::default();
     static ref ASYNC_HTTP_STATUS : Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
     static ref TEMPORARY_PASSWD : Arc<Mutex<String>> = Arc::new(Mutex::new("".to_owned()));
-    static ref IS_REMOTE_MODIFY_ENABLED_BY_CONTROL_PERMISSIONS : Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -85,8 +77,6 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     pub static ref IS_FILE_TRANSFER_ENABLED: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
 }
-
-const INIT_ASYNC_JOB_STATUS: &str = " ";
 
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 #[inline]
@@ -136,19 +126,9 @@ pub fn show_run_without_install() -> bool {
     false
 }
 
+// license 定制客户端能力已随 custom_server 移除，恒为空。
 #[inline]
 pub fn get_license() -> String {
-    #[cfg(windows)]
-    if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
-        #[cfg(feature = "flutter")]
-        return format!("Key: {}\nHost: {}\nAPI: {}", lic.key, lic.host, lic.api);
-        // default license format is html formed (sciter)
-        #[cfg(not(feature = "flutter"))]
-        return format!(
-            "<br /> Key: {} <br /> Host: {} API: {}",
-            lic.key, lic.host, lic.api
-        );
-    }
     Default::default()
 }
 
@@ -445,8 +425,7 @@ pub fn set_option(key: String, value: String) {
             }
         }
     } else if &key == "audio-input" {
-        #[cfg(not(target_os = "ios"))]
-        crate::audio_service::restart();
+        log::error!("被控端音频服务已随 DURT 独立");
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -517,10 +496,6 @@ pub fn set_socks(proxy: String, username: String, password: String) {
             Config::set_socks(Some(socks));
         }
         log::info!("socks updated");
-    }
-    #[cfg(target_os = "android")]
-    {
-        crate::RendezvousMediator::restart();
     }
 }
 
@@ -599,14 +574,6 @@ pub fn temporary_password() -> String {
     return password_security::temporary_password();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     return TEMPORARY_PASSWD.lock().unwrap().clone();
-}
-
-#[inline]
-pub fn update_temporary_password() {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    password_security::update_temporary_password();
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    allow_err!(ipc::update_temporary_password());
 }
 
 #[inline]
@@ -715,9 +682,6 @@ pub fn get_error() -> String {
     #[cfg(target_os = "linux")]
     {
         let dtype = crate::platform::linux::get_display_server();
-        if crate::platform::linux::DISPLAY_SERVER_WAYLAND == dtype {
-            return crate::server::wayland::common_get_error();
-        }
         if dtype != crate::platform::linux::DISPLAY_SERVER_X11 {
             return format!(
                 "{} {}, {}",
@@ -775,14 +739,6 @@ pub fn create_shortcut(_id: String) {
     crate::platform::windows::create_shortcut(&_id).ok();
 }
 
-#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
-#[inline]
-pub fn discover() {
-    std::thread::spawn(move || {
-        allow_err!(crate::lan::discover());
-    });
-}
-
 #[cfg(feature = "flutter")]
 pub fn peer_to_map(id: String, p: PeerConfig) -> HashMap<&'static str, String> {
     use hbb_common::sodiumoxide::base64;
@@ -808,51 +764,8 @@ pub fn peer_exists(id: &str) -> bool {
 }
 
 #[inline]
-pub fn get_lan_peers() -> Vec<HashMap<&'static str, String>> {
-    config::LanPeers::load()
-        .peers
-        .iter()
-        .map(|peer| {
-            HashMap::<&str, String>::from_iter([
-                ("id", peer.id.clone()),
-                ("username", peer.username.clone()),
-                ("hostname", peer.hostname.clone()),
-                ("platform", peer.platform.clone()),
-            ])
-        })
-        .collect()
-}
-
-#[inline]
-pub fn remove_discovered(id: String) {
-    let mut peers = config::LanPeers::load().peers;
-    peers.retain(|x| x.id != id);
-    config::LanPeers::store(&peers);
-}
-
-#[inline]
 pub fn get_uuid() -> String {
     crate::encode64(hbb_common::get_uuid())
-}
-
-#[inline]
-pub fn get_init_async_job_status() -> String {
-    INIT_ASYNC_JOB_STATUS.to_string()
-}
-
-#[inline]
-pub fn reset_async_job_status() {
-    *ASYNC_JOB_STATUS.lock().unwrap() = get_init_async_job_status();
-}
-
-#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
-#[inline]
-pub fn change_id(id: String) {
-    reset_async_job_status();
-    let old_id = get_id();
-    std::thread::spawn(move || {
-        change_id_shared(id, old_id);
-    });
 }
 
 #[inline]
@@ -1049,10 +962,7 @@ pub fn video_save_directory(root: bool) -> String {
 
 #[inline]
 pub fn get_api_server() -> String {
-    crate::get_api_server(
-        get_option("api-server"),
-        get_option("custom-rendezvous-server"),
-    )
+    crate::get_api_server(get_option("api-server"), Default::default())
 }
 
 pub enum DeployResult {
@@ -1124,17 +1034,6 @@ pub fn deploy_device(token: String, new_id: Option<String>) -> DeployResult {
                         ));
                     }
                 }
-            }
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            if let Err(err) = ipc::notify_deployed() {
-                log::warn!("Failed to notify deployed state: {}", err);
-            }
-            #[cfg(target_os = "android")]
-            {
-                crate::rendezvous_mediator::NEEDS_DEPLOY
-                    .store(false, std::sync::atomic::Ordering::SeqCst);
-                crate::rendezvous_mediator::reset_needs_deploy_notification();
-                crate::rendezvous_mediator::RendezvousMediator::restart();
             }
             DeployResult::Ok
         }
@@ -1288,21 +1187,6 @@ fn check_connect_status(reconnect: bool) -> mpsc::UnboundedSender<ipc::Data> {
 }
 
 #[cfg(feature = "flutter")]
-pub fn account_auth(op: String, id: String, uuid: String, remember_me: bool) {
-    account::OidcSession::account_auth(get_api_server(), op, id, uuid, remember_me);
-}
-
-#[cfg(feature = "flutter")]
-pub fn account_auth_cancel() {
-    account::OidcSession::auth_cancel();
-}
-
-#[cfg(feature = "flutter")]
-pub fn account_auth_result() -> String {
-    serde_json::to_string(&account::OidcSession::get_result()).unwrap_or_default()
-}
-
-#[cfg(feature = "flutter")]
 pub fn set_user_default_option(key: String, value: String) {
     use hbb_common::config::UserDefaultConfig;
     UserDefaultConfig::load().set(key, value);
@@ -1412,9 +1296,6 @@ async fn check_connect_status_(reconnect: bool, rx: mpsc::UnboundedReceiver<ipc:
                                     video_conn_count,
                                 };
                             }
-                            Ok(Some(ipc::Data::ControlPermissionsRemoteModify(v))) => {
-                                *IS_REMOTE_MODIFY_ENABLED_BY_CONTROL_PERMISSIONS.lock().unwrap() = v;
-                            }
                             #[cfg(target_os = "windows")]
                             Ok(Some(ipc::Data::FileTransferEnabledState(v))) => {
                                 if let Some(enabled) = v {
@@ -1438,7 +1319,6 @@ async fn check_connect_status_(reconnect: bool, rx: mpsc::UnboundedReceiver<ipc:
                         c.send(&ipc::Data::Config(("temporary-password".to_owned(), None))).await.ok();
                         #[cfg(feature = "flutter")]
                         c.send(&ipc::Data::VideoConnCount(None)).await.ok();
-                        c.send(&ipc::Data::ControlPermissionsRemoteModify(None)).await.ok();
                         #[cfg(target_os = "windows")]
                         c.send(&ipc::Data::FileTransferEnabledState(None)).await.ok();
                     }
@@ -1486,138 +1366,6 @@ pub(crate) async fn send_to_cm(data: &ipc::Data) {
     if let Ok(mut c) = ipc::connect(1000, "_cm").await {
         c.send(data).await.ok();
     }
-}
-
-const INVALID_FORMAT: &'static str = "Invalid format";
-const UNKNOWN_ERROR: &'static str = "Unknown error";
-
-#[inline]
-#[tokio::main(flavor = "current_thread")]
-pub async fn change_id_shared(id: String, old_id: String) -> String {
-    let res = change_id_shared_(id, old_id).await.to_owned();
-    *ASYNC_JOB_STATUS.lock().unwrap() = res.clone();
-    res
-}
-
-pub async fn change_id_shared_(id: String, old_id: String) -> &'static str {
-    if !hbb_common::is_valid_custom_id(&id) {
-        log::debug!(
-            "debugging invalid id: \"{id}\", len: {}, base64: \"{}\"",
-            id.len(),
-            crate::encode64(&id)
-        );
-        let bom = id.trim_start_matches('\u{FEFF}');
-        log::debug!("bom: {}", hbb_common::is_valid_custom_id(&bom));
-        return INVALID_FORMAT;
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let uuid = Bytes::from(
-        hbb_common::machine_uid::get()
-            .unwrap_or("".to_owned())
-            .as_bytes()
-            .to_vec(),
-    );
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let uuid = Bytes::from(hbb_common::get_uuid());
-
-    if uuid.is_empty() {
-        log::error!("Failed to change id, uuid is_empty");
-        return UNKNOWN_ERROR;
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let rendezvous_servers = crate::ipc::get_rendezvous_servers(1_000).await;
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let rendezvous_servers = Config::get_rendezvous_servers();
-
-    let mut futs = Vec::new();
-    let err: Arc<Mutex<&str>> = Default::default();
-    for rendezvous_server in rendezvous_servers {
-        let err = err.clone();
-        let id = id.to_owned();
-        let uuid = uuid.clone();
-        let old_id = old_id.clone();
-        futs.push(tokio::spawn(async move {
-            let tmp = check_id(rendezvous_server, old_id, id, uuid).await;
-            if !tmp.is_empty() {
-                *err.lock().unwrap() = tmp;
-            }
-        }));
-    }
-    join_all(futs).await;
-    let err = *err.lock().unwrap();
-    if err.is_empty() {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        crate::ipc::set_config_async("id", id.to_owned()).await.ok();
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        {
-            Config::set_key_confirmed(false);
-            Config::set_id(&id);
-        }
-    }
-    err
-}
-
-async fn check_id(
-    rendezvous_server: String,
-    old_id: String,
-    id: String,
-    uuid: Bytes,
-) -> &'static str {
-    if let Ok(mut socket) = hbb_common::socket_client::connect_tcp(
-        crate::check_port(rendezvous_server, RENDEZVOUS_PORT),
-        CONNECT_TIMEOUT,
-    )
-    .await
-    {
-        let mut msg_out = Message::new();
-        msg_out.set_register_pk(RegisterPk {
-            old_id,
-            id,
-            uuid,
-            ..Default::default()
-        });
-        let mut ok = false;
-        if socket.send(&msg_out).await.is_ok() {
-            if let Some(msg_in) =
-                crate::common::get_next_nonkeyexchange_msg(&mut socket, None).await
-            {
-                match msg_in.union {
-                    Some(rendezvous_message::Union::RegisterPkResponse(rpr)) => {
-                        match rpr.result.enum_value() {
-                            Ok(register_pk_response::Result::OK) => {
-                                ok = true;
-                            }
-                            Ok(register_pk_response::Result::ID_EXISTS) => {
-                                return "Not available";
-                            }
-                            Ok(register_pk_response::Result::TOO_FREQUENT) => {
-                                return "Too frequent";
-                            }
-                            Ok(register_pk_response::Result::NOT_SUPPORT) => {
-                                return "server_not_support";
-                            }
-                            Ok(register_pk_response::Result::SERVER_ERROR) => {
-                                return "Server error";
-                            }
-                            Ok(register_pk_response::Result::INVALID_ID_FORMAT) => {
-                                return INVALID_FORMAT;
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        if !ok {
-            return UNKNOWN_ERROR;
-        }
-    } else {
-        return "Failed to connect to rendezvous server";
-    }
-    ""
 }
 
 // if it's relay id, return id processed, otherwise return original id
@@ -1734,10 +1482,9 @@ pub fn max_encrypt_len() -> usize {
     hbb_common::config::ENCRYPT_MAX_LEN
 }
 
+// 被控端权限轨已随 hbbs 移除，不再有账户级远程修改策略。
 pub fn is_remote_modify_enabled_by_control_permissions() -> Option<bool> {
-    *IS_REMOTE_MODIFY_ENABLED_BY_CONTROL_PERMISSIONS
-        .lock()
-        .unwrap()
+    None
 }
 
 #[cfg(test)]

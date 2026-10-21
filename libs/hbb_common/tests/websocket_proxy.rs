@@ -158,7 +158,6 @@ async fn proxy_round_trip(
     option(keys::OPTION_PROXY_PASSWORD, &proxy.password);
     let stream = if configured {
         option(keys::OPTION_ALLOW_WEBSOCKET, "Y");
-        option("custom-rendezvous-server", target.host_str().unwrap());
         option(
             "api-server",
             if wss {

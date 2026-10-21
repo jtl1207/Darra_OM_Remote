@@ -458,7 +458,7 @@ mod tests {
     }
 
     // Fixed bytes: the version 0 frame is what released peers send, and the subkeys are the ones
-    // hbbs's own copy of this code pins, so a change here breaks the wire, not just this test.
+    // the peer's own copy of this code pins, so a change here breaks the wire, not just this test.
     #[test]
     fn test_wire_vectors() {
         let hex = |b: &[u8]| b.iter().map(|b| format!("{:02x}", b)).collect::<String>();

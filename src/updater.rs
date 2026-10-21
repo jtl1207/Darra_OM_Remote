@@ -4,10 +4,7 @@ mod download;
 use crate::common::do_check_software_update;
 use artifact::verified_update_artifact_from_release_page_url;
 pub(crate) use artifact::{current_update_arch, current_update_format, current_update_platform};
-pub use artifact::{
-    current_update_artifact_query, get_update_download_file_from_url,
-    verified_update_artifact_for_download_url, verified_update_artifact_for_release_page_url,
-};
+pub use artifact::get_update_download_file_from_url;
 use base::config::keys;
 use download::ensure_verified_update_artifact;
 pub(crate) use download::remove_update_file;
@@ -119,8 +116,7 @@ pub fn stop_auto_update() {
 /// Returns true when there are no active incoming or outgoing connections.
 /// Used to avoid updating while a remote session is in progress.
 pub fn has_no_active_conns() -> bool {
-    let conns = crate::Connection::alive_conns();
-    conns.is_empty() && has_no_controlling_conns()
+    has_no_controlling_conns()
 }
 
 #[cfg(any(not(target_os = "windows"), feature = "flutter"))]

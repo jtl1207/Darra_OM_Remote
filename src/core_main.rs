@@ -57,9 +57,7 @@ pub fn core_main() -> Option<CoreMainAction> {
     let mut i = 0;
     let mut _is_elevate = false;
     let mut _is_run_as_system = false;
-    let mut _is_quick_support = false;
     let mut _is_flutter_invoke_new_connection = false;
-    let mut no_server = false;
     let mut arg_exe = Default::default();
     for arg in std::env::args() {
         if i == 0 {
@@ -83,10 +81,8 @@ pub fn core_main() -> Option<CoreMainAction> {
                 _is_elevate = true;
             } else if arg == "--run-as-system" {
                 _is_run_as_system = true;
-            } else if arg == "--quick_support" {
-                _is_quick_support = true;
-            } else if arg == "--no-server" {
-                no_server = true;
+            } else if arg == "--quick_support" || arg == "--no-server" {
+                // 被控端已随 DURT 独立; 旧被控端启动参数仅兼容吞掉
             } else {
                 args.push(arg);
             }
@@ -157,15 +153,6 @@ pub fn core_main() -> Option<CoreMainAction> {
             return None;
         }
     }
-    #[cfg(windows)]
-    {
-        _is_quick_support |= !crate::platform::is_installed()
-            && args.is_empty()
-            && (is_quick_support_exe(&arg_exe)
-                || config::LocalConfig::get_option("pre-elevate-service") == "Y"
-                || (!click_setup && crate::platform::is_elevated(None).unwrap_or(false)));
-        crate::portable_service::client::set_quick_support(_is_quick_support);
-    }
     let mut log_name = "".to_owned();
     // Keep portable-service logs under a stable directory name.
     let has_portable_service_shmem_arg = args
@@ -188,18 +175,6 @@ pub fn core_main() -> Option<CoreMainAction> {
     }
 
     #[cfg(windows)]
-    if !crate::platform::is_installed()
-        && args.is_empty()
-        && _is_quick_support
-        && !_is_elevate
-        && !_is_run_as_system
-    {
-        use crate::portable_service::client;
-        if let Err(e) = client::start_portable_service(client::StartPara::Direct) {
-            log::error!("Failed to start portable service: {:?}", e);
-        }
-    }
-    #[cfg(windows)]
     if !crate::platform::is_installed() && (_is_elevate || _is_run_as_system) {
         crate::platform::elevate_or_run_as_system(click_setup, _is_elevate, _is_run_as_system);
         return None;
@@ -215,11 +190,10 @@ pub fn core_main() -> Option<CoreMainAction> {
             crate::platform::try_remove_temp_update_files();
             hbb_common::config::PeerConfig::preload_peers();
         }
-        std::thread::spawn(move || crate::start_server(false, no_server));
     } else {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         // Root CLI management commands must talk to the user `--server` main IPC.
-        // Example: `sudo rustdesk --option custom-rendezvous-server` should query the
+        // Example: `sudo rustdesk --option <name>` should query the
         // user's IPC instead of root's `/tmp/<app>-0/ipc`; `connect()` still limits this
         // routing to empty-postfix main IPC only.
         let _user_main_ipc_scope = if crate::platform::is_installed()
@@ -397,14 +371,12 @@ pub fn core_main() -> Option<CoreMainAction> {
             crate::privacy_mode::restore_reg_connectivity(true, false);
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             {
-                crate::start_server(true, false);
+                log::error!("被控端已随 DURT 独立; --server 不再启动本地被控服务");
             }
             #[cfg(target_os = "macos")]
             {
-                let handler = std::thread::spawn(move || crate::start_server(true, false));
+                log::error!("被控端已随 DURT 独立; --server 不再启动本地被控服务");
                 crate::tray::start_tray();
-                // prevent server exit when encountering errors from tray
-                hbb_common::allow_err!(handler.join());
             }
             return None;
         } else if args[0] == "--import-config" {
@@ -474,41 +446,16 @@ pub fn core_main() -> Option<CoreMainAction> {
             }
             if args.len() == 2 {
                 if crate::platform::is_installed() && is_root() {
-                    let old_id = crate::ipc::get_id();
-                    let mut res = crate::ui_interface::change_id_shared(args[1].to_owned(), old_id);
-                    if res.is_empty() {
-                        res = "Done!".to_owned();
-                    }
-                    println!("{}", res);
+                    log::error!("被控端已随 DURT 独立; ID 变更已移除");
+                    println!("被控端已随 DURT 独立; ID 变更已移除");
                 } else {
                     println!("Installation and administrative privileges required!");
                 }
             }
             return None;
         } else if args[0] == "--config" {
-            if args.len() == 2 && !args[0].contains("host=") {
-                if crate::platform::is_installed() && is_root() {
-                    // encrypted string used in renaming exe.
-                    let name = if args[1].ends_with(".exe") {
-                        args[1].to_owned()
-                    } else {
-                        format!("{}.exe", args[1])
-                    };
-                    if let Ok(lic) = crate::custom_server::get_custom_server_from_string(&name) {
-                        if !lic.host.is_empty() {
-                            crate::ui_interface::set_option("key".into(), lic.key);
-                            crate::ui_interface::set_option(
-                                "custom-rendezvous-server".into(),
-                                lic.host,
-                            );
-                            crate::ui_interface::set_option("api-server".into(), lic.api);
-                            crate::ui_interface::set_option("relay-server".into(), lic.relay);
-                        }
-                    }
-                } else {
-                    println!("Installation and administrative privileges required!");
-                }
-            }
+            // 自定义 rendezvous/relay 部署段已随 hbbs 摘除; 连接引擎已替换为 DURT。
+            println!("连接引擎已替换为 DURT; 自定义 rendezvous/relay 部署已移除");
             return None;
         } else if args[0] == "--option" {
             if is_cli_setting_change_disabled() {
@@ -687,15 +634,9 @@ pub fn core_main() -> Option<CoreMainAction> {
             crate::ipc::hwcodec_process();
             return None;
         } else if args[0] == "--terminal-helper" {
-            // Terminal helper process - runs as user to create ConPTY
-            // This is needed because ConPTY has compatibility issues with CreateProcessAsUserW
-            #[cfg(target_os = "windows")]
-            {
-                let helper_args: Vec<String> = args[1..].to_vec();
-                if let Err(e) = crate::server::terminal_helper::run_terminal_helper(&helper_args) {
-                    log::error!("Terminal helper failed: {}", e);
-                }
-            }
+            // 终端助手属被控端能力, 已由独立 DURT 被控服务承载。
+            log::error!("--terminal-helper refused: 连接引擎已替换为 DURT");
+            println!("连接引擎已替换为 DURT; 终端助手由独立 DURT 被控服务提供");
             return None;
         } else if args[0] == "--cm" {
             // call connection manager to establish connections
@@ -898,13 +839,4 @@ fn parse_silent_install_args(args: &[String]) -> (Option<bool>, bool) {
     }
 
     (printer_override, debug)
-}
-
-/// Check if the executable is a Quick Support version.
-/// Note: This function must be kept in sync with `libs/portable/src/main.rs`.
-#[cfg(windows)]
-#[inline]
-fn is_quick_support_exe(exe: &str) -> bool {
-    let exe = exe.to_lowercase();
-    exe.contains("-qs-") || exe.contains("-qs.exe") || exe.contains("_qs.exe")
 }

@@ -972,11 +972,11 @@ impl WebRTCStream {
 
     /// The size a trickle endpoint must stay under for the UDP leg of its route to be safe. It is
     /// the one signaling message that can grow: a peer registered over UDP receives it inside
-    /// `PunchHole` — with the mangled addresses and the permission blobs — as a single datagram,
+    /// the signaling envelope — with the mangled addresses and the permission blobs — as a single datagram,
     /// and one that needs IP fragmentation is dropped without a trace on paths that discard
     /// fragments. The candidates that follow are one small message each and never approach it.
     ///
-    /// Not an MTU calculation: `PunchHole`'s other fields are not bounded here, so a value near
+    /// Not an MTU calculation: the envelope's other fields are not bounded here, so a value near
     /// this number could still fragment. It is a tripwire on a quantity `trickle_endpoint` pins at
     /// ~700 bytes, sized to leave that headroom while still catching a regression that lets
     /// candidates back in — as a log line rather than another silent drop. Nothing enforces it: a
@@ -985,7 +985,7 @@ impl WebRTCStream {
 
     /// The endpoint a trickling peer signals: the session parameters needed to start ICE and DTLS
     /// (ice-ufrag, ice-pwd, fingerprint, setup, the sctp m-line), without the candidates — those
-    /// ride `take_local_ice_rx` and arrive as individual `IceCandidate` messages.
+    /// ride `take_local_ice_rx` and arrive as individual candidate messages.
     ///
     /// Candidates are the only part of a local description that grows. Stripping them makes the
     /// size a property of the value rather than of when it was taken, so it cannot drift with

@@ -20,10 +20,9 @@ pub(crate) use ipc_drm::DrmConn;
 pub(crate) use ipc_drm::connect_drm;
 
 use crate::{
-    common::{is_server, CheckTestNatType},
+    common::is_server,
     privacy_mode,
     privacy_mode::PrivacyModeState,
-    rendezvous_mediator::RendezvousMediator,
     ui_interface::{get_local_option, set_local_option},
 };
 use bytes::Bytes;
@@ -46,8 +45,6 @@ use hbb_common::{
     ResultType,
 };
 use base::config::keys::{self, OPTION_ALLOW_WEBSOCKET};
-#[cfg(windows)]
-pub(crate) use ipc_auth::authorize_windows_portable_service_ipc_connection;
 #[cfg(windows)]
 pub(crate) use ipc_auth::ensure_peer_executable_matches_current_by_pid_opt;
 #[cfg(windows)]
@@ -376,8 +373,6 @@ pub enum Data {
     #[cfg(target_os = "windows")]
     ClipboardNonFile(Option<(String, Vec<ClipboardNonFile>)>),
     PrivacyModeState((i32, PrivacyModeState, String)),
-    TestRendezvousServer,
-    Deployed,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     Keyboard(DataKeyboard),
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -772,7 +767,6 @@ pub async fn new_listener(postfix: &str) -> ResultType<Incoming> {
 
 pub struct CheckIfRestart {
     stop_service: String,
-    rendezvous_servers: Vec<String>,
     audio_input: String,
     voice_call_input: String,
     ws: String,
@@ -785,7 +779,6 @@ impl CheckIfRestart {
     pub fn new() -> CheckIfRestart {
         CheckIfRestart {
             stop_service: Config::get_option("stop-service"),
-            rendezvous_servers: Config::get_rendezvous_servers(),
             audio_input: Config::get_option("audio-input"),
             voice_call_input: Config::get_option("voice-call-input"),
             ws: Config::get_option(OPTION_ALLOW_WEBSOCKET),
@@ -799,14 +792,14 @@ impl CheckIfRestart {
 }
 impl Drop for CheckIfRestart {
     fn drop(&mut self) {
-        // If https proxy is used, we need to restart rendezvous mediator.
+        // 连接引擎已替换为 DURT（被控端是独立 DURT 服务），本地不再驻留 rendezvous mediator，
+        // 没有可重启的本地连接进程；连接相关选项变更只能由 DURT 侧生效，这里如实报错。
         // No need to check if https proxy is used, because this option does not change frequently
-        // and restarting mediator is safe even https proxy is not used.
+        // and resetting the tls cache is safe even https proxy is not used.
         let allow_insecure_tls_fallback_changed = self.allow_insecure_tls_fallback
             != Config::get_option(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK);
         if allow_insecure_tls_fallback_changed
             || self.stop_service != Config::get_option("stop-service")
-            || self.rendezvous_servers != Config::get_rendezvous_servers()
             || self.ws != Config::get_option(OPTION_ALLOW_WEBSOCKET)
             || self.disable_udp != Config::get_option(keys::OPTION_DISABLE_UDP)
             || self.api_server != Config::get_option("api-server")
@@ -814,16 +807,12 @@ impl Drop for CheckIfRestart {
             if allow_insecure_tls_fallback_changed {
                 hbb_common::tls::reset_tls_cache();
             }
-            RendezvousMediator::restart();
+            log::error!("连接引擎已替换为 DURT，本进程不再重启 rendezvous mediator；连接选项变更须在 DURT 侧生效");
         }
-        if self.audio_input != Config::get_option("audio-input") {
-            crate::audio_service::restart();
-        }
-        if self.voice_call_input != Config::get_option("voice-call-input") {
-            crate::audio_service::set_voice_call_input_device(
-                Some(Config::get_option("voice-call-input")),
-                true,
-            )
+        if self.audio_input != Config::get_option("audio-input")
+            || self.voice_call_input != Config::get_option("voice-call-input")
+        {
+            log::error!("被控端音频服务已随 DURT 独立，音频选项变更不在本进程生效");
         }
     }
 }
@@ -839,20 +828,9 @@ async fn handle(data: Data, stream: &mut Connection) {
             );
             allow_err!(stream.send(&Data::SystemInfo(Some(info))).await);
         }
-        Data::ClickTime(_) => {
-            let t = crate::server::CLICK_TIME.load(Ordering::SeqCst);
-            allow_err!(stream.send(&Data::ClickTime(t)).await);
-        }
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        Data::MouseMoveTime(_) => {
-            let t = crate::server::MOUSE_MOVE_TIME.load(Ordering::SeqCst);
-            allow_err!(stream.send(&Data::MouseMoveTime(t)).await);
-        }
         Data::Close => {
             log::info!("Receive close message");
             if EXIT_RECV_CLOSE.load(Ordering::SeqCst) {
-                #[cfg(not(target_os = "android"))]
-                crate::server::input_service::fix_key_down_timeout_at_exit();
                 if is_server() {
                     let _ = privacy_mode::turn_off_privacy(0, Some(PrivacyModeState::OffByPeer));
                 }
@@ -887,9 +865,10 @@ async fn handle(data: Data, stream: &mut Connection) {
             }
         }
         Data::OnlineStatus(_) => {
-            let x = config::get_online_state();
+            // rendezvous 在线状态已随 server 模块删除，本进程无在线状态可报，如实回 0。
+            log::error!("rendezvous 在线状态已随 DURT 独立，本进程不维护在线状态");
             let confirmed = Config::get_key_confirmed();
-            allow_err!(stream.send(&Data::OnlineStatus(Some((x, confirmed)))).await);
+            allow_err!(stream.send(&Data::OnlineStatus(Some((0, confirmed)))).await);
         }
         Data::ConfirmedKey(None) => {
             let out = if Config::get_key_confirmed() {
@@ -904,13 +883,12 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::Socks(Config::get_socks())).await);
             }
             Some(data) => {
-                let _nat = CheckTestNatType::new();
                 if data.proxy.is_empty() {
                     Config::set_socks(None);
                 } else {
                     Config::set_socks(Some(data));
                 }
-                RendezvousMediator::restart();
+                log::error!("连接引擎已替换为 DURT，socks 变更不再重启 rendezvous mediator；代理须由 DURT 侧生效");
                 log::info!("socks updated");
             }
         },
@@ -927,16 +905,6 @@ async fn handle(data: Data, stream: &mut Connection) {
             }
             _ => {}
         },
-        #[cfg(feature = "flutter")]
-        Data::VideoConnCount(None) => {
-            let n = crate::server::AUTHED_CONNS
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|x| x.conn_type == crate::server::AuthConnType::Remote)
-                .count();
-            allow_err!(stream.send(&Data::VideoConnCount(Some(n))).await);
-        }
         Data::Config((name, value)) => match value {
             None => {
                 let value;
@@ -961,14 +929,6 @@ async fn handle(data: Data, stream: &mut Connection) {
                     });
                 } else if name == "salt" {
                     value = Some(Config::get_salt());
-                } else if name == "rendezvous_server" {
-                    value = Some(format!(
-                        "{},{}",
-                        Config::get_rendezvous_server(),
-                        Config::get_rendezvous_servers().join(",")
-                    ));
-                } else if name == "rendezvous_servers" {
-                    value = Some(Config::get_rendezvous_servers().join(","));
                 } else if name == "fingerprint" {
                     value = if Config::get_key_confirmed() {
                         Some(crate::common::pk_to_fingerprint(Config::get_key_pair().1))
@@ -976,14 +936,14 @@ async fn handle(data: Data, stream: &mut Connection) {
                         None
                     };
                 } else if name == "hide_cm" {
-                    value = if crate::hbbs_http::sync::is_pro() || crate::common::is_custom_client()
-                    {
+                    value = if crate::common::is_custom_client() {
                         Some(hbb_common::password_security::hide_cm().to_string())
                     } else {
                         None
                     };
                 } else if name == "voice-call-input" {
-                    value = crate::audio_service::get_voice_call_input_device();
+                    log::error!("被控端音频服务已随 DURT 独立，voice-call-input 无本地值");
+                    value = None;
                 } else if name == "unlock-pin" {
                     value = Some(Config::get_unlock_pin());
                 } else if name == "trusted-devices" {
@@ -1004,8 +964,6 @@ async fn handle(data: Data, stream: &mut Connection) {
                         Config::set_key_confirmed(false);
                         Config::set_id(&value);
                     }
-                } else if name == "temporary-password" {
-                    password::update_temporary_password();
                 } else if name == "permanent-password" {
                     if Config::is_disable_change_permanent_password() {
                         log::warn!("Changing permanent password is disabled");
@@ -1020,11 +978,10 @@ async fn handle(data: Data, stream: &mut Connection) {
                     allow_err!(stream.send(&Data::Config((name.clone(), Some(ack)))).await);
                 } else if name == "salt" {
                     Config::set_salt(&value);
-                } else if name == "voice-call-input" {
-                    crate::audio_service::set_voice_call_input_device(Some(value), true);
                 } else if name == "unlock-pin" {
                     Config::set_unlock_pin(&value);
                 } else {
+                    log::warn!("拒绝未识别或已移除的配置写入: {}", name);
                     return;
                 }
                 if updated {
@@ -1039,7 +996,6 @@ async fn handle(data: Data, stream: &mut Connection) {
             }
             Some(value) => {
                 let _chk = CheckIfRestart::new();
-                let _nat = CheckTestNatType::new();
                 if let Some(v) = value.get("privacy-mode-impl-key") {
                     crate::privacy_mode::switch(v);
                 }
@@ -1073,55 +1029,6 @@ async fn handle(data: Data, stream: &mut Connection) {
                 stream
                     .send(&Data::SyncWinCpuUsage(
                         base::platform::windows::cpu_uage_one_minute()
-                    ))
-                    .await
-            );
-        }
-        Data::TestRendezvousServer => {
-            crate::test_rendezvous_server();
-        }
-        Data::Deployed => {
-            crate::rendezvous_mediator::NEEDS_DEPLOY.store(false, Ordering::SeqCst);
-            crate::rendezvous_mediator::RendezvousMediator::restart();
-        }
-        #[cfg(feature = "flutter")]
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        Data::SwitchSidesRequest(id) => {
-            let uuid = uuid::Uuid::new_v4();
-            crate::server::insert_switch_sides_uuid(id, uuid.clone());
-            crate::hbbs_http::sync::register_switch_grant(uuid.to_string());
-            allow_err!(
-                stream
-                    .send(&Data::SwitchSidesRequest(uuid.to_string()))
-                    .await
-            );
-        }
-        #[cfg(feature = "flutter")]
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        Data::SwitchSidesUuid(uuid, id, action, None) => {
-            let allowed = uuid
-                .parse::<uuid::Uuid>()
-                .map(|uuid| match action {
-                    SwitchSidesUuidAction::Check => {
-                        crate::server::has_pending_switch_sides_uuid(&id, &uuid)
-                    }
-                    SwitchSidesUuidAction::Consume => {
-                        crate::server::claim_pending_switch_sides_uuid(&id, &uuid)
-                    }
-                })
-                .unwrap_or(false);
-            allow_err!(
-                stream
-                    .send(&Data::SwitchSidesUuid(uuid, id, action, Some(allowed)))
-                    .await
-            );
-        }
-        #[cfg(windows)]
-        Data::ControlledSessionCount(_) => {
-            allow_err!(
-                stream
-                    .send(&Data::ControlledSessionCount(
-                        crate::Connection::alive_conns().len()
                     ))
                     .await
             );
@@ -1237,50 +1144,6 @@ async fn handle(data: Data, stream: &mut Connection) {
                 // This branch is left blank for unification and further use.
             }
         },
-        #[cfg(target_os = "windows")]
-        Data::PortForwardSessionCount(c) => match c {
-            None => {
-                let count = crate::server::AUTHED_CONNS
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .filter(|c| c.conn_type == crate::server::AuthConnType::PortForward)
-                    .count();
-                allow_err!(
-                    stream
-                        .send(&Data::PortForwardSessionCount(Some(count)))
-                        .await
-                );
-            }
-            _ => {
-                // Port forward session count is only a get value.
-            }
-        },
-        Data::ControlPermissionsRemoteModify(_) => {
-            use hbb_common::rendezvous_proto::control_permissions::Permission;
-            let state =
-                crate::server::get_control_permission_state(Permission::remote_modify, true);
-            allow_err!(
-                stream
-                    .send(&Data::ControlPermissionsRemoteModify(state))
-                    .await
-            );
-        }
-        #[cfg(target_os = "windows")]
-        Data::FileTransferEnabledState(_) => {
-            use hbb_common::rendezvous_proto::control_permissions::Permission;
-            let state = crate::server::get_control_permission_state(Permission::file, false);
-            let enabled = state.unwrap_or_else(|| {
-                crate::server::Connection::is_permission_enabled_locally(
-                    keys::OPTION_ENABLE_FILE_TRANSFER,
-                )
-            });
-            allow_err!(
-                stream
-                    .send(&Data::FileTransferEnabledState(Some(enabled)))
-                    .await
-            );
-        }
         _ => {}
     };
 }
@@ -1498,84 +1361,7 @@ pub async fn connect_for_uid(
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]
 pub async fn start_pa() {
-    use crate::audio_service::AUDIO_DATA_SIZE_U8;
-
-    match new_listener("_pa").await {
-        Ok(mut incoming) => {
-            loop {
-                if let Some(result) = incoming.next().await {
-                    match result {
-                        Ok(stream) => {
-                            let mut stream = Connection::new(stream);
-                            let mut device: String = "".to_owned();
-                            if let Some(Ok(Some(Data::Config((_, Some(x)))))) =
-                                stream.next_timeout2(1000).await
-                            {
-                                device = x;
-                            }
-                            if !device.is_empty() {
-                                device = crate::platform::linux::get_pa_source_name(&device);
-                            }
-                            if device.is_empty() {
-                                device = crate::platform::linux::get_pa_monitor();
-                            }
-                            if device.is_empty() {
-                                continue;
-                            }
-                            let spec = pulse::sample::Spec {
-                                format: pulse::sample::Format::F32le,
-                                channels: 2,
-                                rate: crate::platform::PA_SAMPLE_RATE,
-                            };
-                            log::info!("pa monitor: {:?}", device);
-                            // systemctl --user status pulseaudio.service
-                            let mut buf: Vec<u8> = vec![0; AUDIO_DATA_SIZE_U8];
-                            match psimple::Simple::new(
-                                None,                             // Use the default server
-                                &crate::get_app_name(),           // Our application’s name
-                                pulse::stream::Direction::Record, // We want a record stream
-                                Some(&device),                    // Use the default device
-                                "record",                         // Description of our stream
-                                &spec,                            // Our sample format
-                                None,                             // Use default channel map
-                                None, // Use default buffering attributes
-                            ) {
-                                Ok(s) => loop {
-                                    // A dead pulse handle fails every read at once, so ignoring the
-                                    // error left nothing pacing this loop and it burned a core.
-                                    if let Err(err) = s.read(&mut buf) {
-                                        log::error!("Failed to read audio data:{}", err);
-                                        break;
-                                    }
-                                    {
-                                        let out =
-                                            if buf.iter().filter(|x| **x != 0).next().is_none() {
-                                                vec![]
-                                            } else {
-                                                buf.clone()
-                                            };
-                                        if let Err(err) = stream.send_raw(out.into()).await {
-                                            log::error!("Failed to send audio data:{}", err);
-                                            break;
-                                        }
-                                    }
-                                },
-                                Err(err) => {
-                                    log::error!("Could not create simple pulse: {}", err);
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            log::error!("Couldn't get pa client: {:?}", err);
-                        }
-                    }
-                }
-            }
-        }
-        Err(err) => {
-            log::error!("Failed to start pa ipc server: {}", err);
-        }
-    }
+    log::error!("被控端音频服务已随 DURT 独立，本进程不再提供 PA 采集");
 }
 
 pub struct ConnectionTmpl<T> {
@@ -1685,10 +1471,6 @@ async fn set_data_async(data: &Data) -> ResultType<()> {
 #[tokio::main(flavor = "current_thread")]
 pub async fn set_config(name: &str, value: String) -> ResultType<()> {
     set_config_async(name, value).await
-}
-
-pub fn update_temporary_password() -> ResultType<()> {
-    set_config("temporary-password", "".to_owned())
 }
 
 fn apply_permanent_password_storage_and_salt_payload(payload: Option<&str>) -> ResultType<()> {
@@ -1866,20 +1648,6 @@ pub fn get_id() -> String {
     Config::get_id()
 }
 
-pub async fn get_rendezvous_server(ms_timeout: u64) -> (String, Vec<String>) {
-    if let Ok(Some(v)) = get_config_async("rendezvous_server", ms_timeout).await {
-        let mut urls = v.split(",");
-        let a = urls.next().unwrap_or_default().to_owned();
-        let b: Vec<String> = urls.map(|x| x.to_owned()).collect();
-        (a, b)
-    } else {
-        (
-            Config::get_rendezvous_server(),
-            Config::get_rendezvous_servers(),
-        )
-    }
-}
-
 async fn get_options_(ms_timeout: u64) -> ResultType<HashMap<String, String>> {
     let mut c = connect(ms_timeout, "").await?;
     c.send(&Data::Options(None)).await?;
@@ -1920,7 +1688,6 @@ pub fn set_option(key: &str, value: &str) {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn set_options(value: HashMap<String, String>) -> ResultType<()> {
-    let _nat = CheckTestNatType::new();
     if let Ok(mut c) = connect(1000, "").await {
         c.send(&Data::Options(Some(value.clone()))).await?;
         // do not put below before connect, because we need to check should_exit
@@ -1948,13 +1715,6 @@ pub async fn get_nat_type(ms_timeout: u64) -> i32 {
         .unwrap_or(Config::get_nat_type())
 }
 
-pub async fn get_rendezvous_servers(ms_timeout: u64) -> Vec<String> {
-    if let Ok(Some(v)) = get_config_async("rendezvous_servers", ms_timeout).await {
-        return v.split(',').map(|x| x.to_owned()).collect();
-    }
-    return Config::get_rendezvous_servers();
-}
-
 #[inline]
 async fn get_socks_(ms_timeout: u64) -> ResultType<Option<config::Socks5Server>> {
     let mut c = connect(ms_timeout, "").await?;
@@ -1978,7 +1738,6 @@ pub async fn get_socks() -> Option<config::Socks5Server> {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn set_socks(value: config::Socks5Server) -> ResultType<()> {
-    let _nat = CheckTestNatType::new();
     Config::set_socks(if value.proxy.is_empty() {
         None
     } else {
@@ -2016,19 +1775,6 @@ pub async fn get_socks_ws() -> (Option<config::Socks5Server>, String) {
 
 pub fn get_proxy_status() -> bool {
     Config::get_socks().is_some()
-}
-#[tokio::main(flavor = "current_thread")]
-pub async fn test_rendezvous_server() -> ResultType<()> {
-    let mut c = connect(1000, "").await?;
-    c.send(&Data::TestRendezvousServer).await?;
-    Ok(())
-}
-
-#[tokio::main(flavor = "current_thread")]
-pub async fn notify_deployed() -> ResultType<()> {
-    let mut c = connect(1000, "").await?;
-    c.send(&Data::Deployed).await?;
-    Ok(())
 }
 
 #[tokio::main(flavor = "current_thread")]

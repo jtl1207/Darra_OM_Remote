@@ -20,7 +20,7 @@ use hbb_common::tokio::sync::mpsc::unbounded_channel;
 #[cfg(target_os = "windows")]
 use hbb_common::tokio::sync::Mutex as TokioMutex;
 use hbb_common::{
-    allow_err, bail,
+    allow_err,
     config::{option2bool, Config},
     log,
     protobuf::Message as _,
@@ -847,7 +847,10 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
 pub async fn start_ipc<T: InvokeUiCM>(cm: ConnectionManager<T>) {
     #[cfg(target_os = "windows")]
     {
-        let enabled = crate::Connection::is_permission_enabled_locally(OPTION_ENABLE_FILE_TRANSFER);
+        let enabled = option2bool(
+            OPTION_ENABLE_FILE_TRANSFER,
+            &Config::get_option(OPTION_ENABLE_FILE_TRANSFER),
+        );
         let mut lock = crate::ui_interface::IS_FILE_TRANSFER_ENABLED
             .lock()
             .unwrap();

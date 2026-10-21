@@ -1,7 +1,5 @@
 use crate::{
-    config::{
-        keys::OPTION_RELAY_SERVER, use_ws, Config, Socks5Server, RELAY_PORT, RENDEZVOUS_PORT,
-    },
+    config::{use_ws, Config, Socks5Server},
     protobuf::Message,
     socket_client::split_host_port,
     sodiumoxide::crypto::secretbox::Key,
@@ -478,54 +476,18 @@ pub fn check_ws(endpoint: &str) -> String {
         return endpoint.to_string();
     }
 
-    let Some((endpoint_host, endpoint_port)) = split_host_port(endpoint) else {
+    let Some((_endpoint_host, _endpoint_port)) = split_host_port(endpoint) else {
         debug_assert!(false, "endpoint doesn't have port");
         return endpoint.to_string();
     };
 
-    let custom_rendezvous_server = Config::get_rendezvous_server();
-    let relay_server = Config::get_option(OPTION_RELAY_SERVER);
-    let rendezvous_port = split_host_port(&custom_rendezvous_server)
-        .map(|(_, p)| p)
-        .unwrap_or(RENDEZVOUS_PORT);
-    let relay_port = split_host_port(&relay_server)
-        .map(|(_, p)| p)
-        .unwrap_or(RELAY_PORT);
-
-    let (relay, dst_port) = if endpoint_port == rendezvous_port {
-        // rendezvous
-        (false, endpoint_port + 2)
-    } else if endpoint_port == rendezvous_port - 1 {
-        // online
-        (false, endpoint_port + 3)
-    } else if endpoint_port == relay_port || endpoint_port == rendezvous_port + 1 {
-        // relay
-        // https://github.com/rustdesk/rustdesk/blob/6ffbcd1375771f2482ec4810680623a269be70f1/src/rendezvous_mediator.rs#L615
-        // https://github.com/rustdesk/rustdesk-server/blob/235a3c326ceb665e941edb50ab79faa1208f7507/src/relay_server.rs#L83, based on relay port.
-        (true, endpoint_port + 2)
-    } else {
-        // fallback relay
-        // for controlling side, relay server is passed from the controlled side, not related to local config.
-        (true, endpoint_port + 2)
-    };
-
-    let (address, is_domain) = if crate::is_ip_str(endpoint) {
-        (format!("{}:{}", endpoint_host, dst_port), false)
-    } else {
-        let domain_path = if relay { "/ws/relay" } else { "/ws/id" };
-        (format!("{}{}", endpoint_host, domain_path), true)
-    };
-    let protocol = if is_domain {
-        let api_server = Config::get_option("api-server");
-        if api_server.starts_with("https") {
-            "wss"
-        } else {
-            "ws"
-        }
+    // rendezvous/relay 端口路由已随 hbbs 移除，仅把端点规整为 ws://host:port 格式。
+    let protocol = if Config::get_option("api-server").starts_with("https") {
+        "wss"
     } else {
         "ws"
     };
-    format!("{}://{}", protocol, address)
+    format!("{}://{}", protocol, endpoint)
 }
 
 #[cfg(test)]
@@ -581,134 +543,22 @@ mod tests {
     #[test]
     fn test_check_ws() {
         let options = Config::get_options();
-        // enable websocket
         Config::set_option(keys::OPTION_ALLOW_WEBSOCKET.to_string(), "Y".to_string());
-
-        // not set custom-rendezvous-server
-        Config::set_option("custom-rendezvous-server".to_string(), "".to_string());
-        Config::set_option("relay-server".to_string(), "".to_string());
         Config::set_option("api-server".to_string(), "".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        assert_eq!(check_ws("rustdesk.com:21115"), "ws://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "ws://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21117"), "ws://rustdesk.com/ws/relay");
-        // set relay-server without port
-        Config::set_option("relay-server".to_string(), "127.0.0.1".to_string());
+        // 无 rendezvous/relay 路由，仅把端点规整为 ws://host:port。
+        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21115");
+        assert_eq!(check_ws("rustdesk.com:21116"), "ws://rustdesk.com:21116");
+        // api-server 为 https 时用 wss。
         Config::set_option(
             "api-server".to_string(),
-            "https://api.rustdesk.com".to_string(),
+            "https://api.example.com".to_string(),
         );
+        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com:21116");
+        // 已是 ws:// 的端点原样返回。
         assert_eq!(
-            check_ws("[0:0:0:0:0:0:0:1]:21115"),
-            "ws://[0:0:0:0:0:0:0:1]:21118"
+            check_ws("ws://rustdesk.com:21116"),
+            "ws://rustdesk.com:21116"
         );
-        assert_eq!(
-            check_ws("[0:0:0:0:0:0:0:1]:21116"),
-            "ws://[0:0:0:0:0:0:0:1]:21118"
-        );
-        assert_eq!(
-            check_ws("[0:0:0:0:0:0:0:1]:21117"),
-            "ws://[0:0:0:0:0:0:0:1]:21119"
-        );
-        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com/ws/id");
-        assert_eq!(
-            check_ws("rustdesk.com:21117"),
-            "wss://rustdesk.com/ws/relay"
-        );
-        // set relay-server with default port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:21117".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with custom port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:34567".to_string());
-        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com/ws/id");
-        assert_eq!(
-            check_ws("rustdesk.com:34567"),
-            "wss://rustdesk.com/ws/relay"
-        );
-
-        // set custom-rendezvous-server without port
-        Config::set_option(
-            "custom-rendezvous-server".to_string(),
-            "127.0.0.1".to_string(),
-        );
-        Config::set_option("relay-server".to_string(), "".to_string());
-        Config::set_option("api-server".to_string(), "".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server without port
-        Config::set_option("relay-server".to_string(), "127.0.0.1".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with default port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:21117".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with custom port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:34567".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:34567"), "ws://127.0.0.1:34569");
-
-        // set custom-rendezvous-server without default port
-        Config::set_option(
-            "custom-rendezvous-server".to_string(),
-            "127.0.0.1".to_string(),
-        );
-        Config::set_option("relay-server".to_string(), "".to_string());
-        Config::set_option("api-server".to_string(), "".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server without port
-        Config::set_option("relay-server".to_string(), "127.0.0.1".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with default port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:21117".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with custom port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:34567".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:34567"), "ws://127.0.0.1:34569");
-
-        // set custom-rendezvous-server with custom port
-        Config::set_option(
-            "custom-rendezvous-server".to_string(),
-            "127.0.0.1:23456".to_string(),
-        );
-        Config::set_option("relay-server".to_string(), "".to_string());
-        Config::set_option("api-server".to_string(), "".to_string());
-        assert_eq!(check_ws("127.0.0.1:23455"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:23456"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:23457"), "ws://127.0.0.1:23459");
-        // set relay-server without port
-        Config::set_option("relay-server".to_string(), "127.0.0.1".to_string());
-        assert_eq!(check_ws("127.0.0.1:23455"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:23456"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with default port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:21117".to_string());
-        assert_eq!(check_ws("127.0.0.1:23455"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:23456"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        // set relay-server with custom port
-        Config::set_option("relay-server".to_string(), "127.0.0.1:34567".to_string());
-        assert_eq!(check_ws("127.0.0.1:23455"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:23456"), "ws://127.0.0.1:23458");
-        assert_eq!(check_ws("127.0.0.1:34567"), "ws://127.0.0.1:34569");
         Config::set_options(options);
     }
     // A server-to-client frame is unmasked, so it can be put on the wire by hand: the header alone,

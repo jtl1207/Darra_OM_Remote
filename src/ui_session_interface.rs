@@ -17,7 +17,7 @@ use hbb_common::{
     allow_err,
     config::{Config, LocalConfig, PeerConfig},
     get_version_number, log,
-    rendezvous_proto::ConnType,
+    ConnType,
     tokio::{
         self,
         sync::mpsc,
@@ -38,7 +38,6 @@ use std::{
     },
     time::SystemTime,
 };
-use uuid::Uuid;
 
 use crate::client::io_loop::Remote;
 use crate::client::{
@@ -581,11 +580,8 @@ impl<T: InvokeUiSession> Session<T> {
         if LocalConfig::get_option("access_token").is_empty() {
             return "".to_owned();
         }
-        crate::get_audit_server(
-            Config::get_option("api-server"),
-            Config::get_option("custom-rendezvous-server"),
-            typ,
-        )
+        // 审计服务器归 om-master 单源 (api-server); 旧「自定义 rendezvous 服务器」设置已随 DURT 退役。
+        crate::get_audit_server(Config::get_option("api-server"), String::new(), typ)
     }
 
     pub fn send_note(&self, note: String) {
@@ -1982,7 +1978,8 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>, round: u32) {
     let (sender, mut receiver) = mpsc::unbounded_channel::<Data>();
     *handler.sender.write().unwrap() = Some(sender.clone());
     let token = LocalConfig::get_option("access_token");
-    let key = crate::get_key(false).await;
+    // DURT 自带 mTLS + 准入票据认证, 旧密钥交换 (get_key) 已随协议层退役, key 留空。
+    let key = String::new();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if handler.is_port_forward() {
         handler.lc.write().unwrap().port_forward_mux = crate::port_forward::mux_enabled();

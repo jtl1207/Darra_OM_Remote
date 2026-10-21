@@ -1,4 +1,3 @@
-use crate::hbbs_http::create_http_client_with_url_strict;
 use hbb_common::{bail, log, ResultType};
 use std::{
     io::{Read, Seek, Write},
@@ -32,7 +31,7 @@ pub(super) fn ensure_verified_update_artifact(
             remove_cached_update_artifact(file_path)?;
         }
     }
-    let client = create_http_client_with_url_strict(download_url)?;
+    let client = reqwest::blocking::Client::builder().build()?;
     let response = client.get(download_url).send()?;
     if !response.status().is_success() {
         bail!(

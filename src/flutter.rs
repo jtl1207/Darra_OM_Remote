@@ -11,7 +11,7 @@ use hbb_common::dlopen::{
 };
 use hbb_common::{
     anyhow::anyhow, bail, config::LocalConfig, get_version_number, log,
-    rendezvous_proto::ConnType, ResultType,
+    ConnType, ResultType,
 };
 use base::message_proto::*;
 use serde::Serialize;

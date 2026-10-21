@@ -8,7 +8,7 @@ use hbb_common::{
     futures::{SinkExt, StreamExt},
     log,
     protobuf::Message as _,
-    rendezvous_proto::ConnType,
+    ConnType,
     tcp, timeout,
     tokio::{self, net::TcpStream, sync::mpsc},
     tokio_util::codec::{BytesCodec, Framed},
@@ -174,8 +174,12 @@ async fn connect_and_login(
     } else {
         ConnType::PORT_FORWARD
     };
-    let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
+    let ((mut stream, direct, ..), (feedback, legacy_route)) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
+    // 连接引擎已替换为 DURT: rendezvous/relay 反馈通道已摘除, 命中旧引擎路由即明确报错, 不做双路径回退。
+    if feedback != 0 || !legacy_route.is_empty() {
+        bail!("连接引擎已替换为 DURT");
+    }
     interface.update_direct(Some(direct));
     if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
         if !confirm_insecure_connection(&interface, ui_receiver).await {
@@ -187,8 +191,6 @@ async fn connect_and_login(
     let mut received = false;
     let mut challenge = None;
     let mut pending_login = None;
-
-    let _keep_it = hc_connection(feedback, rendezvous_server, token).await;
 
     loop {
         tokio::select! {
@@ -415,8 +417,12 @@ async fn connect_and_login_mux(
     } else {
         ConnType::PORT_FORWARD
     };
-    let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
+    let ((mut stream, direct, ..), (feedback, legacy_route)) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
+    // 连接引擎已替换为 DURT: rendezvous/relay 反馈通道已摘除, 命中旧引擎路由即明确报错, 不做双路径回退。
+    if feedback != 0 || !legacy_route.is_empty() {
+        bail!("连接引擎已替换为 DURT");
+    }
     interface.update_direct(Some(direct));
     if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
         if !confirm_insecure_connection(&interface, ui_receiver).await {
@@ -430,8 +436,6 @@ async fn connect_and_login_mux(
     let mut received = false;
     let mut challenge = None;
     let mut pending_login = None;
-
-    let _keep_it = hc_connection(feedback, rendezvous_server, token).await;
 
     loop {
         tokio::select! {

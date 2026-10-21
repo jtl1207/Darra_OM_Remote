@@ -1,7 +1,5 @@
 use super::{validate_install_app_name, CursorData, ResultType};
 use crate::{
-    common::PORTABLE_APPNAME_RUNTIME_ENV_KEY,
-    custom_server::*,
     ipc,
     privacy_mode::win_topmost_window::{self, WIN_TOPMOST_INJECTED_PROCESS_EXE},
 };
@@ -203,7 +201,7 @@ pub fn get_cursor() -> ResultType<Option<u64>> {
         #[allow(invalid_value)]
         let mut ci: CURSORINFO = mem::MaybeUninit::uninit().assume_init();
         ci.cbSize = std::mem::size_of::<CURSORINFO>() as _;
-        if crate::portable_service::client::get_cursor_info(&mut ci) == FALSE {
+        if GetCursorInfo(&mut ci) == FALSE {
             return Err(io::Error::last_os_error().into());
         }
         if ci.flags & CURSOR_SHOWING == 0 {
@@ -1734,13 +1732,6 @@ if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} 
     );
     let src_exe = cur_exe.clone();
 
-    // potential bug here: if run_cmd cancelled, but config file is changed.
-    if let Some(lic) = get_license() {
-        Config::set_option("key".into(), lic.key);
-        Config::set_option("custom-rendezvous-server".into(), lic.host);
-        Config::set_option("api-server".into(), lic.api);
-    }
-
     let tray_shortcuts = if config::is_outgoing_only() {
         "".to_owned()
     } else {
@@ -2142,15 +2133,6 @@ pub fn prepare_custom_client_update() -> ResultType<bool> {
     Ok(true)
 }
 
-pub fn get_license_from_exe_name() -> ResultType<CustomServer> {
-    let mut exe = std::env::current_exe()?.to_str().unwrap_or("").to_owned();
-    // if defined portable appname entry, replace original executable name with it.
-    if let Ok(portable_exe) = std::env::var(PORTABLE_APPNAME_RUNTIME_ENV_KEY) {
-        exe = portable_exe;
-    }
-    get_custom_server_from_string(&exe)
-}
-
 // We can't directly use `RegKey::set_value` to update the registry value, because it will fail with `ERROR_ACCESS_DENIED`
 // So we have to use `run_cmds` to update the registry value.
 pub fn update_install_option(k: &str, v: &str) -> ResultType<()> {
@@ -2180,10 +2162,6 @@ pub fn is_win_10_or_greater() -> bool {
 }
 
 pub fn bootstrap() -> bool {
-    if let Ok(lic) = get_license_from_exe_name() {
-        *config::EXE_RENDEZVOUS_SERVER.write().unwrap() = lic.host.clone();
-    }
-
     #[cfg(debug_assertions)]
     {
         true
@@ -2458,37 +2436,21 @@ pub fn elevate_or_run_as_system(is_setup: bool, is_elevate: bool, is_run_as_syst
         is_run_as_system,
         crate::username(),
     );
-    let mut arg_elevate = if is_setup {
+    let arg_elevate = if is_setup {
         "--noinstall --elevate"
     } else {
         "--elevate"
     }
     .to_owned();
-    let mut arg_run_as_system = if is_setup {
+    let arg_run_as_system = if is_setup {
         "--noinstall --run-as-system"
     } else {
         "--run-as-system"
     }
     .to_owned();
-    let shmem_name_from_args = crate::portable_service::portable_service_shmem_name_from_args();
-    if shmem_name_from_args.is_none() && crate::portable_service::has_portable_service_shmem_arg() {
-        log::error!("Invalid portable service shared memory argument, aborting elevation flow");
-        // This is a malformed bootstrap argument in a privilege-sensitive path.
-        // Keep fail-closed process termination here to avoid continuing elevation
-        // with inconsistent shared-memory contract.
-        std::process::exit(1);
-    }
-    if let Some(shmem_name) = shmem_name_from_args {
-        let shmem_arg = crate::portable_service::portable_service_shmem_arg(&shmem_name);
-        arg_elevate.push(' ');
-        arg_elevate.push_str(&shmem_arg);
-        arg_run_as_system.push(' ');
-        arg_run_as_system.push_str(&shmem_arg);
-    }
     if is_root() {
         if is_run_as_system {
-            log::info!("run portable service");
-            crate::portable_service::server::run_portable_service();
+            log::error!("被控端已随 DURT 独立; 便携服务不再以 SYSTEM 启动");
         }
     } else {
         match is_elevated(None) {
@@ -4073,22 +4035,6 @@ pub fn alloc_console() {
     unsafe {
         alloc_console_and_redirect();
     }
-}
-
-fn get_license() -> Option<CustomServer> {
-    let mut lic: CustomServer = Default::default();
-    if let Ok(tmp) = get_license_from_exe_name() {
-        lic = tmp;
-    } else {
-        // for back compatibility from migrating from <= 1.2.1 to 1.2.2
-        lic.key = get_reg("Key");
-        lic.host = get_reg("Host");
-        lic.api = get_reg("Api");
-    }
-    if lic.key.is_empty() || lic.host.is_empty() {
-        return None;
-    }
-    Some(lic)
 }
 
 pub struct WallPaperRemover {

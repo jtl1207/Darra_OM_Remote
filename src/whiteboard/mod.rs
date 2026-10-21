@@ -19,7 +19,6 @@ use macos::create_event_loop;
 #[cfg(target_os = "linux")]
 pub use linux::is_supported;
 
-pub use client::*;
 pub use server::*;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

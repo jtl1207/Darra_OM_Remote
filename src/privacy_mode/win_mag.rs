@@ -6,6 +6,11 @@ pub use super::win_topmost_window::PrivacyModeImpl;
 
 pub(super) const PRIVACY_MODE_IMPL: &str = super::PRIVACY_MODE_IMPL_WIN_MAG;
 
+// 放大镜隐私模式依赖 Windows Magnification API, 能力探活与 create_capturer 同源。
+pub(super) fn is_supported() -> bool {
+    scrap::CapturerMag::is_supported()
+}
+
 pub fn create_capturer(
     privacy_mode_id: i32,
     origin: (i32, i32),

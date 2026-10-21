@@ -9,16 +9,7 @@ pub use platform::{
     set_cursor_pos, start_os_service,
 };
 #[cfg(not(any(target_os = "ios")))]
-/// cbindgen:ignore
-mod server;
-#[cfg(not(any(target_os = "ios")))]
-pub use self::server::*;
 mod client;
-mod lan;
-#[cfg(not(any(target_os = "ios")))]
-mod rendezvous_mediator;
-#[cfg(not(any(target_os = "ios")))]
-pub use self::rendezvous_mediator::*;
 /// cbindgen:ignore
 pub mod common;
 #[cfg(not(any(target_os = "ios")))]
@@ -47,7 +38,6 @@ mod auth_2fa;
 mod clipboard;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod core_main;
-mod custom_server;
 mod lang;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod port_forward;
@@ -66,8 +56,6 @@ mod ui_cm_interface;
 mod ui_interface;
 mod ui_session_interface;
 
-mod hbbs_http;
-
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub mod clipboard_file;
 
@@ -76,4 +64,4 @@ pub mod privacy_mode;
 #[cfg(windows)]
 pub mod virtual_display_manager;
 
-mod kcp_stream;
+pub mod durt;

@@ -1,7 +1,6 @@
 use crate::ui_interface::get_option;
 #[cfg(windows)]
 use crate::{
-    display_service,
     ipc::{connect, Data},
     platform::is_installed,
 };
@@ -100,7 +99,7 @@ lazy_static::lazy_static! {
             if win_exclude_from_capture::is_supported() {
                 PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE
             } else {
-                if display_service::is_privacy_mode_mag_supported() {
+                if win_mag::is_supported() {
                     PRIVACY_MODE_IMPL_WIN_MAG
                 } else {
                     if is_installed() {
@@ -294,29 +293,6 @@ fn turn_on_privacy_sync(impl_key: &str, conn_id: i32) -> Option<ResultType<bool>
     Some(privacy_mode_lock.as_mut()?.turn_on_privacy(conn_id))
 }
 
-#[cfg(not(target_os = "ios"))]
-pub(crate) fn close_other_remote_connections_for_privacy(owner_id: i32) {
-    use crate::server::{AuthConnType, AUTHED_CONNS};
-
-    let privacy_mode_lock = PRIVACY_MODE.lock().unwrap();
-    // Ownership can change while the caller validates the capturer.
-    if privacy_mode_lock.as_ref().map(|mode| mode.pre_conn_id()) != Some(owner_id) {
-        return;
-    }
-    for connection in AUTHED_CONNS.lock().unwrap().iter() {
-        if connection.conn_type != AuthConnType::Remote || connection.conn_id == owner_id {
-            continue;
-        }
-        if let Err(err) = connection.sender.send(crate::ipc::Data::Close) {
-            hbb_common::log::debug!(
-                "Failed to close connection {} for privacy mode: {}",
-                connection.conn_id,
-                err
-            );
-        }
-    }
-}
-
 #[inline]
 pub fn turn_off_privacy(conn_id: i32, state: Option<PrivacyModeState>) -> Option<ResultType<()>> {
     Some(
@@ -363,7 +339,7 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
                 "privacy_mode_impl_mag_tip",
             ));
         } else {
-            if display_service::is_privacy_mode_mag_supported() {
+            if win_mag::is_supported() {
                 vec_impls.push((PRIVACY_MODE_IMPL_WIN_MAG, "privacy_mode_impl_mag_tip"));
             }
         }
@@ -407,31 +383,6 @@ pub fn is_current_privacy_mode_impl(impl_key: &str) -> bool {
         .as_ref()
         .map(|pm| pm.get_impl_key() == impl_key)
         .unwrap_or(false)
-}
-
-#[inline]
-#[cfg(not(windows))]
-pub fn check_privacy_mode_err(
-    _privacy_mode_id: i32,
-    _display_idx: usize,
-    _timeout_millis: u64,
-) -> String {
-    "".to_owned()
-}
-
-#[inline]
-#[cfg(windows)]
-pub fn check_privacy_mode_err(
-    privacy_mode_id: i32,
-    display_idx: usize,
-    timeout_millis: u64,
-) -> String {
-    // win magnifier implementation requires a test of creating a capturer.
-    if is_current_privacy_mode_impl(PRIVACY_MODE_IMPL_WIN_MAG) {
-        crate::video_service::test_create_capturer(privacy_mode_id, display_idx, timeout_millis)
-    } else {
-        "".to_owned()
-    }
 }
 
 #[inline]
