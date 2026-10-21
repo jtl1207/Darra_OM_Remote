@@ -60,6 +60,7 @@ void showDeployDialog() {
       }
       if (res.isEmpty) {
         close();
+        await gFFI.serverModel.fetchID();
         showToast(translate("Successful"));
       } else {
         setState(() {

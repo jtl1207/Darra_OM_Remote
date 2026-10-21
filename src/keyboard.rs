@@ -4,12 +4,13 @@ use crate::flutter;
 use crate::platform::windows::{get_char_from_vk, get_unicode_from_vk};
 #[cfg(not(feature = "flutter"))]
 use crate::ui::CUR_SESSION;
+use crate::ui_session_interface::{InvokeUiSession, Session};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::common::GrabState;
+use crate::{client::get_key_state, common::GrabState};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use base::log;
+use hbb_common::log;
 use base::message_proto::*;
-use crate::flutter_ffi::SessionID;
+use hbb_common::SessionID;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use rdev::KeyCode;
 use rdev::{Event, EventType, Key};
@@ -77,23 +78,6 @@ lazy_static::lazy_static! {
         m.insert(Key::MetaRight, false);
         Mutex::new(m)
     };
-}
-
-/// enigo 键盘句柄：读取本机锁定键/修饰键状态用。
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-lazy_static::lazy_static! {
-    static ref ENIGO: Arc<Mutex<enigo::Enigo>> = Arc::new(Mutex::new(enigo::Enigo::new()));
-}
-
-/// 读取本机按键状态（锁定键/修饰键），键盘输入核心。
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub fn get_key_state(key: enigo::Key) -> bool {
-    use enigo::KeyboardControllable;
-    // macOS 无 NumLock 指示灯，按常亮处理
-    if cfg!(target_os = "macos") && key == enigo::Key::NumLock {
-        return true;
-    }
-    ENIGO.lock().unwrap().get_key_state(key)
 }
 
 pub mod shortcuts;
@@ -377,6 +361,41 @@ pub mod client {
         let peer = get_peer_platform().to_lowercase();
         for key_event in event_to_key_events(peer, &event, keyboard_mode, lock_modes) {
             send_key_event(&key_event);
+        }
+    }
+
+    pub fn process_event_with_session<T: InvokeUiSession>(
+        keyboard_mode: &str,
+        event: &Event,
+        lock_modes: Option<i32>,
+        session: &Session<T>,
+        session_id: SessionID,
+    ) {
+        // Shortcut intercept — see the long comment in `process_event` above
+        // for the consume / feature-gate rationale. The only difference
+        // here is that the Flutter FFI path threads an explicit SessionID
+        // through, so dispatch targets the exact tab the keystroke originated
+        // from — no dependency on the global focus tracker.
+        #[cfg(feature = "flutter")]
+        if crate::keyboard::shortcuts::try_dispatch(
+            Some(&session_id),
+            event,
+            keyboard_mode,
+            || session.peer_platform().to_lowercase(),
+            |key_event| session.send_key_event(key_event),
+        ) {
+            return;
+        }
+        #[cfg(not(feature = "flutter"))]
+        let _ = session_id;
+
+        let keyboard_mode = get_keyboard_mode_enum(keyboard_mode);
+        if is_long_press(&event) {
+            return;
+        }
+        let peer = session.peer_platform().to_lowercase();
+        for key_event in event_to_key_events(peer, &event, keyboard_mode, lock_modes) {
+            session.send_key_event(&key_event);
         }
     }
 
@@ -1349,7 +1368,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
             event.position_code
         }
         OS_LOWER_MACOS => {
-            if base::config::LocalConfig::get_kb_layout_type() == "ISO" {
+            if hbb_common::config::LocalConfig::get_kb_layout_type() == "ISO" {
                 rdev::win_scancode_to_macos_iso_code(event.position_code)?
             } else {
                 rdev::win_scancode_to_macos_code(event.position_code)?
@@ -1369,7 +1388,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
     let keycode = match _peer {
         OS_LOWER_WINDOWS => rdev::linux_code_to_win_scancode(event.position_code as _)?,
         OS_LOWER_MACOS => {
-            if base::config::LocalConfig::get_kb_layout_type() == "ISO" {
+            if hbb_common::config::LocalConfig::get_kb_layout_type() == "ISO" {
                 rdev::linux_code_to_macos_iso_code(event.position_code as _)?
             } else {
                 rdev::linux_code_to_macos_code(event.position_code as _)?
@@ -1383,7 +1402,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
         OS_LOWER_WINDOWS => rdev::usb_hid_code_to_win_scancode(event.usb_hid as _)?,
         OS_LOWER_LINUX => rdev::usb_hid_code_to_linux_code(event.usb_hid as _)?,
         OS_LOWER_MACOS => {
-            if base::config::LocalConfig::get_kb_layout_type() == "ISO" {
+            if hbb_common::config::LocalConfig::get_kb_layout_type() == "ISO" {
                 rdev::usb_hid_code_to_macos_iso_code(event.usb_hid as _)?
             } else {
                 rdev::usb_hid_code_to_macos_code(event.usb_hid as _)?
@@ -1582,8 +1601,8 @@ pub fn keycode_to_rdev_key(keycode: u32) -> Key {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod input_source {
     #[cfg(target_os = "macos")]
-    use base::log;
-    use crate::flutter_ffi::SessionID;
+    use hbb_common::log;
+    use hbb_common::SessionID;
 
     use crate::ui_interface::{get_local_option, set_local_option};
 

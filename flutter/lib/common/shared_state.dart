@@ -5,6 +5,29 @@ import '../consts.dart';
 
 // TODO: A lot of dup code.
 
+class PrivacyModeState {
+  static String tag(String id) => 'privacy_mode_$id';
+
+  static void init(String id) {
+    final key = tag(id);
+    if (!Get.isRegistered<RxString>(tag: key)) {
+      final RxString state = ''.obs;
+      Get.put<RxString>(state, tag: key);
+    }
+  }
+
+  static void delete(String id) {
+    final key = tag(id);
+    if (Get.isRegistered<RxString>(tag: key)) {
+      Get.delete<RxString>(tag: key);
+    } else {
+      Get.find<RxString>(tag: key).value = '';
+    }
+  }
+
+  static RxString find(String id) => Get.find<RxString>(tag: tag(id));
+}
+
 class BlockInputState {
   static String tag(String id) => 'block_input_$id';
 
@@ -317,6 +340,7 @@ class UnreadChatCountState {
 }
 
 initSharedStates(String id) {
+  PrivacyModeState.init(id);
   BlockInputState.init(id);
   CurrentDisplayState.init(id);
   KeyboardEnabledState.init(id);
@@ -330,6 +354,7 @@ initSharedStates(String id) {
 }
 
 removeSharedStates(String id) {
+  PrivacyModeState.delete(id);
   BlockInputState.delete(id);
   CurrentDisplayState.delete(id);
   ShowRemoteCursorState.delete(id);

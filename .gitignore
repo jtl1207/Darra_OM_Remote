@@ -44,8 +44,6 @@ flatpak/repo/**
 flatpak/*.flatpak
 # bridge file
 lib/generated_bridge.dart
-# flutter/dart 生成件 (codegen 产出, 生成物不手改)
-*.g.dart
 # vscode devcontainer
 .gitconfig
 .vscode-server/

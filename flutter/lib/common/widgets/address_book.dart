@@ -1,22 +1,26 @@
 import 'dart:math';
 
 import 'package:bot_toast/bot_toast.dart';
+import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:dynamic_layouts/dynamic_layouts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
+import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/common/widgets/peer_card.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/widgets/popup_menu.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
-import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
 import 'package:get/get.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 
 import '../../common.dart';
 import 'dialog.dart';
+import 'login.dart';
 
 final hideAbTagsPanel = false.obs;
 
@@ -35,7 +39,14 @@ class _AddressBookState extends State<AddressBook> {
 
   @override
   Widget build(BuildContext context) => Obx(() {
-        return Column(
+        if (!gFFI.userModel.isLogin) {
+          return Center(
+              child: ElevatedButton(
+                  onPressed: loginDialog, child: Text(translate("Login"))));
+        } else if (gFFI.userModel.networkError.isNotEmpty) {
+          return netWorkErrorWidget();
+        } else {
+          return Column(
             children: [
               // NOT use Offstage to wrap LinearProgressIndicator
               if (gFFI.abModel.currentAbLoading.value &&
@@ -57,7 +68,8 @@ class _AddressBookState extends State<AddressBook> {
                     : _buildAddressBookLandscape()),
               ),
             ],
-        );
+          );
+        }
       });
 
   Widget _buildAddressBookLandscape() {
@@ -75,6 +87,7 @@ class _AddressBookState extends State<AddressBook> {
                 height: double.infinity,
                 child: Column(
                   children: [
+                    _buildAbDropdown(),
                     _buildTagHeader().marginOnly(
                         left: 8.0,
                         right: gFFI.abModel.legacyMode.value ? 8.0 : 0,
@@ -86,6 +99,7 @@ class _AddressBookState extends State<AddressBook> {
                         child: _buildTags(),
                       ),
                     ),
+                    _buildAbPermission(),
                   ],
                 ),
               ),
@@ -112,6 +126,7 @@ class _AddressBookState extends State<AddressBook> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    _buildAbDropdown(),
                     _buildTagHeader().marginOnly(left: 8.0, right: 0),
                     Container(
                       width: double.infinity,
@@ -123,6 +138,163 @@ class _AddressBookState extends State<AddressBook> {
             ).marginOnly(bottom: 12.0)),
         _buildPeersViews()
       ],
+    );
+  }
+
+  Widget _buildAbPermission() {
+    icon(IconData data, String tooltip) {
+      return Tooltip(
+          message: translate(tooltip),
+          waitDuration: Duration.zero,
+          child: Icon(data, size: 12.0).marginSymmetric(horizontal: 2.0));
+    }
+
+    return Obx(() {
+      if (gFFI.abModel.legacyMode.value) return Offstage();
+      if (gFFI.abModel.current.isPersonal()) {
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            icon(Icons.cloud_off, "Personal"),
+          ],
+        );
+      } else {
+        List<Widget> children = [];
+        final rule = gFFI.abModel.current.sharedProfile()?.rule;
+        if (rule == ShareRule.read.value) {
+          children.add(
+              icon(Icons.visibility, ShareRule.desc(ShareRule.read.value)));
+        } else if (rule == ShareRule.readWrite.value) {
+          children
+              .add(icon(Icons.edit, ShareRule.desc(ShareRule.readWrite.value)));
+        } else if (rule == ShareRule.fullControl.value) {
+          children.add(icon(
+              Icons.security, ShareRule.desc(ShareRule.fullControl.value)));
+        }
+        final owner = gFFI.abModel.current.sharedProfile()?.owner;
+        if (owner != null) {
+          children.add(icon(Icons.person, "${translate("Owner")}: $owner"));
+        }
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: children,
+        );
+      }
+    });
+  }
+
+  Widget _buildAbDropdown() {
+    if (gFFI.abModel.legacyMode.value) {
+      return Offstage();
+    }
+    final names = gFFI.abModel.addressBookNames();
+    if (!names.contains(gFFI.abModel.currentName.value)) {
+      return Offstage();
+    }
+    // order: personal, divider, character order
+    // https://pub.dev/packages/dropdown_button2#3-dropdownbutton2-with-items-of-different-heights-like-dividers
+    final personalAddressBookName = gFFI.abModel.personalAddressBookName();
+    bool contains = names.remove(personalAddressBookName);
+    names.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    if (contains) {
+      names.insert(0, personalAddressBookName);
+    }
+
+    Row buildItem(String e, {bool button = false}) {
+      return Row(
+        children: [
+          Expanded(
+            child: Tooltip(
+                waitDuration: Duration(milliseconds: 500),
+                message: gFFI.abModel.translatedName(e),
+                child: Text(
+                  gFFI.abModel.translatedName(e),
+                  style: button ? null : TextStyle(fontSize: 14.0),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: button ? TextAlign.center : null,
+                )),
+          ),
+        ],
+      );
+    }
+
+    final items = names
+        .map((e) => DropdownMenuItem(value: e, child: buildItem(e)))
+        .toList();
+    var menuItemStyleData = MenuItemStyleData(height: 36);
+    if (contains && items.length > 1) {
+      items.insert(1, DropdownMenuItem(enabled: false, child: Divider()));
+      List<double> customHeights = List.filled(items.length, 36);
+      customHeights[1] = 4;
+      menuItemStyleData = MenuItemStyleData(customHeights: customHeights);
+    }
+    final TextEditingController textEditingController = TextEditingController();
+
+    final isOptFixed = isOptionFixed(kOptionCurrentAbName);
+    return DropdownButton2<String>(
+      value: gFFI.abModel.currentName.value,
+      onChanged: isOptFixed
+          ? null
+          : (value) {
+              if (value != null) {
+                gFFI.abModel.setCurrentName(value);
+                bind.setLocalFlutterOption(k: kOptionCurrentAbName, v: value);
+              }
+            },
+      customButton: Obx(() => Container(
+            height: stateGlobal.isPortrait.isFalse ? 48 : 40,
+            child: Row(children: [
+              Expanded(
+                  child:
+                      buildItem(gFFI.abModel.currentName.value, button: true)),
+              Icon(Icons.arrow_drop_down),
+            ]),
+          )),
+      underline: Container(
+        height: 0.7,
+        color: Theme.of(context).dividerColor.withOpacity(0.1),
+      ),
+      menuItemStyleData: menuItemStyleData,
+      items: items,
+      isExpanded: true,
+      isDense: true,
+      dropdownSearchData: DropdownSearchData(
+        searchController: textEditingController,
+        searchInnerWidgetHeight: 50,
+        searchInnerWidget: Container(
+          height: 50,
+          padding: const EdgeInsets.only(
+            top: 8,
+            bottom: 4,
+            right: 8,
+            left: 8,
+          ),
+          child: TextFormField(
+            expands: true,
+            maxLines: null,
+            controller: textEditingController,
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              hintText: translate('Search'),
+              hintStyle: const TextStyle(fontSize: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ).workaroundFreezeLinuxMint(),
+        ),
+        searchMatchFn: (item, searchValue) {
+          return item.value
+              .toString()
+              .toLowerCase()
+              .contains(searchValue.toLowerCase());
+        },
+      ),
     );
   }
 
@@ -187,84 +359,26 @@ class _AddressBookState extends State<AddressBook> {
     return Expanded(
       child: Align(
           alignment: Alignment.topLeft,
-          child: Obx(() => gFFI.abModel.groupByTag.value
-              ? _buildGroupedPeers()
-              : AddressBookPeersView(
-                  menuPadding: widget.menuPadding,
-                ))),
+          child: AddressBookPeersView(
+            menuPadding: widget.menuPadding,
+          )),
     );
   }
 
-  /// 按 tag 分组渲染设备列表；每台设备只出现在首个命中分组，避免重复行。
-  /// 受左侧选中 tag 筛选（与 AddressBookPeersView 同口径），组头可点快速筛选。
-  Widget _buildGroupedPeers() {
-    final selected = gFFI.abModel.selectedTags.toList();
-    final order = <String>[];
-    final groups = <String, List<Peer>>{};
-    for (final p in gFFI.abModel.currentAbPeers) {
-      final pt = p.tags.map((e) => e.toString()).toList();
-      String? hit;
-      if (selected.isEmpty) {
-        hit = pt.isEmpty ? kUntagged : pt.first;
-      } else {
-        for (final t in pt) {
-          if (selected.contains(t)) {
-            hit = t;
-            break;
-          }
-        }
-        if (hit == null && pt.isEmpty && selected.contains(kUntagged)) {
-          hit = kUntagged;
-        }
-      }
-      if (hit == null) continue;
-      if (!groups.containsKey(hit)) {
-        groups[hit] = <Peer>[];
-        order.add(hit);
-      }
-      groups[hit]!.add(p);
-    }
-    if (gFFI.abModel.sortTags.value) order.sort();
-    return ListView(
-      children: [
-        for (final g in order) ...[
-          _buildGroupHeader(g, groups[g]!.length),
-          for (final p in groups[g]!)
-            Container(
-              height: 45,
-              child: AddressBookPeerCard(
-                  peer: p, menuPadding: widget.menuPadding),
-            ).marginOnly(bottom: 4.0),
-        ],
-      ],
-    );
-  }
-
-  /// tag 分组小节头：色点 + 名称 + 设备数，点按即只筛该 tag。
-  Widget _buildGroupHeader(String tag, int count) {
-    final color = gFFI.abModel.getCurrentAbTagColor(tag);
-    return InkWell(
-      onTap: () {
-        final selected = gFFI.abModel.selectedTags;
-        if (selected.length == 1 && selected.first == tag) {
-          gFFI.abModel.unsetSelectedTags();
-        } else {
-          selected.value = [tag];
-        }
+  @protected
+  MenuEntryBase<String> syncMenuItem() {
+    final isOptFixed = isOptionFixed(syncAbOption);
+    return MenuEntrySwitch<String>(
+      switchType: SwitchType.scheckbox,
+      text: translate('Sync with recent sessions'),
+      getter: () async {
+        return shouldSyncAb();
       },
-      child: Row(
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ).marginOnly(right: 6),
-          Text(tag,
-              style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-          const Spacer(),
-          Text('$count', style: TextStyle(color: color)),
-        ],
-      ).marginOnly(top: 4.0, bottom: 4.0, right: 8.0),
+      setter: (bool v) async {
+        gFFI.abModel.setShouldAsync(v);
+      },
+      dismissOnClicked: true,
+      enabled: (!isOptFixed).obs,
     );
   }
 
@@ -306,25 +420,6 @@ class _AddressBookState extends State<AddressBook> {
     );
   }
 
-  @protected
-  MenuEntryBase<String> groupMenuItem() {
-    final isOptFixed = isOptionFixed(groupAbTagOption);
-    return MenuEntrySwitch<String>(
-      switchType: SwitchType.scheckbox,
-      text: translate('Group by tag'),
-      getter: () async {
-        return shouldGroupAbTags();
-      },
-      setter: (bool v) async {
-        bind.mainSetLocalOption(
-            key: groupAbTagOption, value: v ? 'Y' : defaultOptionNo);
-        gFFI.abModel.groupByTag.value = v;
-      },
-      dismissOnClicked: true,
-      enabled: (!isOptFixed).obs,
-    );
-  }
-
   void _showMenu(RelativeRect pos) {
     final canWrite = gFFI.abModel.current.canWrite();
     final items = [
@@ -333,10 +428,17 @@ class _AddressBookState extends State<AddressBook> {
       getEntry(translate("Unselect all tags"), gFFI.abModel.unsetSelectedTags),
       if (gFFI.abModel.legacyMode.value)
         sortMenuItem(), // It's already sorted after pulling down
+      if (canWrite) syncMenuItem(),
       filterMenuItem(),
-      groupMenuItem(),
-      if (gFFI.peerTabModel.multiSelectionMode)
-        getEntry(translate("Tag selected devices"), abTagSelected),
+      if (!gFFI.abModel.legacyMode.value && canWrite)
+        MenuEntryDivider<String>(),
+      if (!gFFI.abModel.legacyMode.value && canWrite)
+        getEntry(translate("ab_web_console_tip"), () async {
+          final url = await bind.mainGetApiServer();
+          if (await canLaunchUrlString(url)) {
+            launchUrlString(url);
+          }
+        }),
     ];
 
     mod_menu.showMenu(
@@ -573,16 +675,6 @@ class _AddressBookState extends State<AddressBook> {
         onCancel: close,
       );
     });
-  }
-
-  /// 多选批量打标入口：新 tag 落到当前选中设备（云端 TagSync 同步）。
-  void abTagSelected() async {
-    if (gFFI.peerTabModel.selectedPeers.isEmpty) {
-      BotToast.showText(
-          contentColor: Colors.red, text: translate('No peer selected'));
-      return;
-    }
-    abAddTag();
   }
 
   void abAddTag() async {

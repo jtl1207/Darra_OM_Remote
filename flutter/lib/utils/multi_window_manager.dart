@@ -14,17 +14,31 @@ import 'package:flutter_hbb/models/input_model.dart';
 enum WindowType {
   Main,
   RemoteDesktop,
+  FileTransfer,
   ViewCamera,
+  PortForward,
   Terminal,
   Unknown
 }
 
 extension Index on int {
   WindowType get windowType {
-    if (this < 0 || this >= WindowType.values.length) {
-      return WindowType.Unknown;
+    switch (this) {
+      case 0:
+        return WindowType.Main;
+      case 1:
+        return WindowType.RemoteDesktop;
+      case 2:
+        return WindowType.FileTransfer;
+      case 3:
+        return WindowType.ViewCamera;
+      case 4:
+        return WindowType.PortForward;
+      case 5:
+        return WindowType.Terminal;
+      default:
+        return WindowType.Unknown;
     }
-    return WindowType.values[this];
   }
 }
 
@@ -47,7 +61,9 @@ class RustDeskMultiWindowManager {
   final Set<int> _activeWindows = {};
   final List<AsyncCallback> _windowActiveCallbacks = List.empty(growable: true);
   final List<int> _remoteDesktopWindows = List.empty(growable: true);
+  final List<int> _fileTransferWindows = List.empty(growable: true);
   final List<int> _viewCameraWindows = List.empty(growable: true);
+  final List<int> _portForwardWindows = List.empty(growable: true);
   final List<int> _terminalWindows = List.empty(growable: true);
 
   moveTabToNewWindow(int windowId, String peerId, String sessionId,
@@ -211,6 +227,7 @@ class RustDeskMultiWindowManager {
     String? password,
     bool? forceRelay,
     String? switchUuid,
+    bool? isRDP,
     bool? isSharedPassword,
     String? connToken,
   }) async {
@@ -223,6 +240,9 @@ class RustDeskMultiWindowManager {
     if (switchUuid != null) {
       params['switch_uuid'] = switchUuid;
     }
+    if (isRDP != null) {
+      params['isRDP'] = isRDP;
+    }
     if (isSharedPassword != null) {
       params['isSharedPassword'] = isSharedPassword;
     }
@@ -231,6 +251,7 @@ class RustDeskMultiWindowManager {
     }
     final msg = jsonEncode(params);
 
+    // separate window for file transfer is not supported
     bool openInTabs = type != WindowType.RemoteDesktop ||
         mainGetLocalBoolOptionSync(kOptionOpenNewConnInTabs);
 
@@ -265,6 +286,25 @@ class RustDeskMultiWindowManager {
     );
   }
 
+  Future<MultiWindowCallResult> newFileTransfer(
+    String remoteId, {
+    String? password,
+    bool? isSharedPassword,
+    bool? forceRelay,
+    String? connToken,
+  }) async {
+    return await newSession(
+      WindowType.FileTransfer,
+      kWindowEventNewFileTransfer,
+      remoteId,
+      _fileTransferWindows,
+      password: password,
+      forceRelay: forceRelay,
+      isSharedPassword: isSharedPassword,
+      connToken: connToken,
+    );
+  }
+
   Future<MultiWindowCallResult> newViewCamera(
     String remoteId, {
     String? password,
@@ -281,6 +321,27 @@ class RustDeskMultiWindowManager {
       password: password,
       forceRelay: forceRelay,
       switchUuid: switchUuid,
+      isSharedPassword: isSharedPassword,
+      connToken: connToken,
+    );
+  }
+
+  Future<MultiWindowCallResult> newPortForward(
+    String remoteId,
+    bool isRDP, {
+    String? password,
+    bool? isSharedPassword,
+    bool? forceRelay,
+    String? connToken,
+  }) async {
+    return await newSession(
+      WindowType.PortForward,
+      kWindowEventNewPortForward,
+      remoteId,
+      _portForwardWindows,
+      password: password,
+      forceRelay: forceRelay,
+      isRDP: isRDP,
       isSharedPassword: isSharedPassword,
       connToken: connToken,
     );
@@ -346,8 +407,12 @@ class RustDeskMultiWindowManager {
         return [kMainWindowId];
       case WindowType.RemoteDesktop:
         return _remoteDesktopWindows;
+      case WindowType.FileTransfer:
+        return _fileTransferWindows;
       case WindowType.ViewCamera:
         return _viewCameraWindows;
+      case WindowType.PortForward:
+        return _portForwardWindows;
       case WindowType.Terminal:
         return _terminalWindows;
       case WindowType.Unknown:
@@ -363,12 +428,17 @@ class RustDeskMultiWindowManager {
       case WindowType.RemoteDesktop:
         _remoteDesktopWindows.clear();
         break;
+      case WindowType.FileTransfer:
+        _fileTransferWindows.clear();
+        break;
       case WindowType.ViewCamera:
         _viewCameraWindows.clear();
         break;
+      case WindowType.PortForward:
+        _portForwardWindows.clear();
+        break;
       case WindowType.Terminal:
         _terminalWindows.clear();
-        break;
       case WindowType.Unknown:
         break;
     }

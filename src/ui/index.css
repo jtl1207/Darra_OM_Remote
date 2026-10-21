@@ -34,10 +34,30 @@ body {
     position: relative;
 }
 
+#ab .left-pane {
+    border-radius: 1em;
+    padding: 1em;
+}
+
+#ab .right-pane {
+    background: none;
+}
+
+#ab .right-content {
+    overflow: unset;
+}
+
 .left-pane > div:nth-child(1) {
     border-spacing: 1em;
     padding: 20px;
-    padding-bottom: 20px;
+    padding-bottom: 60px; /* reserve space for bottom connect-status */
+}
+
+.left-pane > div.connect-status {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
 }
 
 .left-pane div {
@@ -155,6 +175,51 @@ span.clear-input:hover {
     border-radius: 1em;
 }
 
+.card-connect {
+    @CARD;
+    width: 320px;
+}
+
+.right-buttons {
+    text-align: right;
+}
+
+.right-buttons>button {
+    margin-left: 1.6em;
+}
+
+div.connect-status {
+    left: 240px;
+    border-top: color(border) solid 1px;
+    width: 100%;
+    padding: 1em;
+}
+
+div.connect-status > span.connect-status-icon {
+    border-radius: 4px;
+    width: 8px;
+    height: 8px;
+    display: inline-block;
+    margin-right: 1em;
+}
+
+div.connect-status > span.link {
+  margin-left: 1em;
+  display: inline-block;
+}
+
+span.connect-status-1 {
+    background: #e04f5f;
+}
+
+span.connect-status1 {
+    background: #32bea6;
+}
+
+span.connect-status0 {
+    background: #F5853B;
+}
+
 div.recent-sessions-content {
     border-spacing: 1em;
     flow: horizontal-flow;
@@ -264,14 +329,94 @@ svg#menu:hover {
     background: color(gray-bg);
 }
 
+svg#edit:hover {
+    color: color(text);
+}
 
-div#myid {
+svg#edit {
+    display: inline-block;
+}
+
+div.install-me, div.trust-me {
+    margin-top: 0.5em;
+    padding: 20px;
+    color: white;
+    background: linear-gradient(left,#e242bc,#f4727c);
+}
+
+div.trust-me > div:nth-child(1),
+div.install-me > div:nth-child(1) {
+    font-size: 1.2em;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 0.5em;
+}
+
+div.install-me > div:nth-child(2) {
+    line-height: 1.4em;
+}
+
+#install-me.link {
+    margin-top: 0.5em;
+}
+
+div.trust-me > div:nth-child(2) {
+    font-size: 0.9em;
+    margin-bottom: 1em;
+}
+
+div.install-me > div:nth-child(3),
+div.trust-me > div:nth-child(3) {
+    text-align: center;
+    font-size: 1.5em;
+    font-weight: bold;
+}
+
+div.trust-me > div:nth-child(4),
+div.trust-me > div:nth-child(5) {
+    margin-top: 0.5em;
+    text-align: center;
+}
+
+div#myid, div#tags-label {
     position: relative;
 }
 
-div#myid svg#menu {
+div#myid svg#menu, div#tags-label svg#menu {
     position: absolute;
     right: -1em;
+}
+
+div#tags-label svg#menu:hover {
+    background-color: #ddd;
+}
+
+div.remote-session svg#menu {
+    position: absolute;
+    right: 0;
+    top: 0;
+}
+
+.install-me .button {
+    height: 2em;
+    line-height: 2em;
+    text-align: center;
+    font-weight: bold;
+    font-size: 1em;
+    margin-top: 1em;
+    border-color: white;
+    border: 1px;
+    background: none;
+    color: white;
+}
+
+svg#refresh-password {
+    display: inline-block;
+    stroke:#ddd;
+}
+
+svg#refresh-password:hover {
+    stroke:color(text);
 }
 
 li:disabled, li:disabled:hover {

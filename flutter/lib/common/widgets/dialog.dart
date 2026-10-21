@@ -12,6 +12,7 @@ import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:get/get.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_hbb/utils/http_service.dart' as http;
 
 import '../../common.dart';
@@ -572,6 +573,80 @@ abstract class ValidationField extends StatelessWidget {
 
   String? validate();
   bool get isReady;
+}
+
+class Dialog2FaField extends ValidationField {
+  Dialog2FaField({
+    Key? key,
+    required this.controller,
+    this.autoFocus = true,
+    this.reRequestFocus = false,
+    this.title,
+    this.hintText,
+    this.errorText,
+    this.readyCallback,
+    this.onChanged,
+  }) : super(key: key);
+
+  final TextEditingController controller;
+  final bool autoFocus;
+  final bool reRequestFocus;
+  final String? title;
+  final String? hintText;
+  final String? errorText;
+  final VoidCallback? readyCallback;
+  final VoidCallback? onChanged;
+  final errMsg = translate('2FA code must be 6 digits.');
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogVerificationCodeField(
+      title: title ?? translate('2FA code'),
+      controller: controller,
+      errorText: errorText,
+      autoFocus: autoFocus,
+      reRequestFocus: reRequestFocus,
+      hintText: hintText,
+      readyCallback: readyCallback,
+      onChanged: _onChanged,
+      keyboardType: TextInputType.number,
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9]')),
+      ],
+    );
+  }
+
+  String get text => controller.text;
+  bool get isAllDigits => text.codeUnits.every((e) => e >= 48 && e <= 57);
+
+  @override
+  bool get isReady => text.length == 6 && isAllDigits;
+
+  @override
+  String? validate() => isReady ? null : errMsg;
+
+  _onChanged(StateSetter setState, SimpleWrapper<String?> errText) {
+    onChanged?.call();
+
+    if (text.length > 6) {
+      setState(() => errText.value = errMsg);
+      return;
+    }
+
+    if (!isAllDigits) {
+      setState(() => errText.value = errMsg);
+      return;
+    }
+
+    if (isReady) {
+      readyCallback?.call();
+      return;
+    }
+
+    if (errText.value != null) {
+      setState(() => errText.value = null);
+    }
+  }
 }
 
 class DialogEmailCodeField extends ValidationField {
@@ -2201,6 +2276,137 @@ void changeBot({Function()? callback}) async {
   });
 }
 
+void change2fa({Function()? callback}) async {
+  if (bind.mainHasValid2FaSync()) {
+    await bind.mainSetOption(key: "2fa", value: "");
+    await bind.mainClearTrustedDevices();
+    callback?.call();
+    return;
+  }
+  var new2fa = (await bind.mainGenerate2Fa());
+  final secretRegex = RegExp(r'secret=([^&]+)');
+  final secret = secretRegex.firstMatch(new2fa)?.group(1);
+  String? errorText;
+  final controller = TextEditingController();
+  gFFI.dialogManager.show((setState, close, context) {
+    onVerify() async {
+      if (await bind.mainVerify2Fa(code: controller.text.trim())) {
+        callback?.call();
+        close();
+      } else {
+        errorText = translate('wrong-2fa-code');
+      }
+    }
+
+    final codeField = Dialog2FaField(
+      controller: controller,
+      errorText: errorText,
+      onChanged: () => setState(() => errorText = null),
+      title: translate('Verification code'),
+      readyCallback: () {
+        onVerify();
+        setState(() {});
+      },
+    );
+
+    getOnSubmit() => codeField.isReady ? onVerify : null;
+
+    return CustomAlertDialog(
+      title: Text(translate("enable-2fa-title")),
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(translate("enable-2fa-desc"),
+                  style: TextStyle(fontSize: 12))
+              .marginOnly(bottom: 12),
+          SizedBox(
+              width: 160,
+              height: 160,
+              child: QrImageView(
+                backgroundColor: Colors.white,
+                data: new2fa,
+                version: QrVersions.auto,
+                size: 160,
+                gapless: false,
+              )).marginOnly(bottom: 6),
+          SelectableText(secret ?? '', style: TextStyle(fontSize: 12))
+              .marginOnly(bottom: 12),
+          Row(children: [Expanded(child: codeField)]),
+        ],
+      ),
+      actions: [
+        dialogButton("Cancel", onPressed: close, isOutline: true),
+        dialogButton("OK", onPressed: getOnSubmit()),
+      ],
+      onCancel: close,
+    );
+  });
+}
+
+void enter2FaDialog(
+    SessionID sessionId, OverlayDialogManager dialogManager) async {
+  final controller = TextEditingController();
+  final RxBool submitReady = false.obs;
+  final RxBool trustThisDevice = false.obs;
+
+  dialogManager.dismissAll();
+  dialogManager.show((setState, close, context) {
+    cancel() {
+      close();
+      closeConnection();
+    }
+
+    submit() {
+      gFFI.send2FA(sessionId, controller.text.trim(), trustThisDevice.value);
+      close();
+      dialogManager.showLoading(translate('Logging in...'),
+          onCancel: closeConnection);
+    }
+
+    late Dialog2FaField codeField;
+
+    codeField = Dialog2FaField(
+      controller: controller,
+      title: translate('Verification code'),
+      onChanged: () => submitReady.value = codeField.isReady,
+    );
+
+    final trustField = Obx(() => CheckboxListTile(
+          contentPadding: const EdgeInsets.all(0),
+          dense: true,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: Text(translate("Trust this device")),
+          value: trustThisDevice.value,
+          onChanged: (value) {
+            if (value == null) return;
+            trustThisDevice.value = value;
+          },
+        ));
+
+    return CustomAlertDialog(
+        title: Text(translate('enter-2fa-title')),
+        content: Column(
+          children: [
+            codeField,
+            if (bind.sessionGetEnableTrustedDevices(sessionId: sessionId))
+              trustField,
+          ],
+        ),
+        actions: [
+          dialogButton('Cancel',
+              onPressed: cancel,
+              isOutline: true,
+              style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyMedium?.color)),
+          Obx(() => dialogButton(
+                'OK',
+                onPressed: submitReady.isTrue ? submit : null,
+              )),
+        ],
+        onSubmit: submit,
+        onCancel: cancel);
+  });
+}
 
 // This dialog should not be dismissed, otherwise it will be black screen, have not reproduced this.
 void showWindowsSessionsDialog(

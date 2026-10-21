@@ -3,7 +3,7 @@ use super::{
     port::{check_add_local_port, check_delete_local_port},
     printer::{add_printer, delete_printer},
 };
-use anyhow::{bail, Result as ResultType};
+use hbb_common::{allow_err, bail, lazy_static, log, ResultType};
 use std::{path::PathBuf, sync::Mutex};
 use windows_strings::PCWSTR;
 
@@ -63,18 +63,14 @@ pub fn install_update_printer(app_name: &str) -> ResultType<()> {
     let should_install_driver = match get_installed_driver_version(&rd_printer_driver_name)? {
         Some(_version) => {
             delete_printer(&rd_printer_name)?;
-            if let Err(err) = uninstall_driver(&rd_printer_driver_name) {
-                log::debug!("uninstall printer driver: {:?}", err);
-            }
+            allow_err!(uninstall_driver(&rd_printer_driver_name));
             true
         }
         None => true,
     };
 
     if should_install_driver {
-        if let Err(err) = install_driver(&rd_printer_driver_name, inf_file.as_ptr()) {
-            log::debug!("install printer driver: {:?}", err);
-        }
+        allow_err!(install_driver(&rd_printer_driver_name, inf_file.as_ptr()));
     }
 
     add_printer(&rd_printer_name, &rd_printer_driver_name, &rd_printer_port)?;
@@ -92,13 +88,7 @@ pub fn uninstall_printer(app_name: &str) {
 
     let _lock = SETUP_MTX.lock().unwrap();
 
-    if let Err(err) = delete_printer(&rd_printer_name) {
-        log::debug!("delete printer: {:?}", err);
-    }
-    if let Err(err) = uninstall_driver(&rd_printer_driver_name) {
-        log::debug!("uninstall printer driver: {:?}", err);
-    }
-    if let Err(err) = check_delete_local_port(&rd_printer_port) {
-        log::debug!("delete printer port: {:?}", err);
-    }
+    allow_err!(delete_printer(&rd_printer_name));
+    allow_err!(uninstall_driver(&rd_printer_driver_name));
+    allow_err!(check_delete_local_port(&rd_printer_port));
 }

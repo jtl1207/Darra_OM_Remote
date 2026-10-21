@@ -2,8 +2,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use base::log;
-use crate::flutter_ffi::SessionID;
+use hbb_common::log;
 use serde::{Deserialize, Serialize};
 
 const LOCAL_CONFIG_KEY: &str = "keyboard-shortcuts";
@@ -27,6 +26,7 @@ pub mod action_id {
     pub const INSERT_LOCK: &str          = "insert_lock";
     pub const REFRESH: &str              = "refresh";
     pub const TOGGLE_BLOCK_INPUT: &str   = "toggle_block_input";
+    pub const TOGGLE_RECORDING: &str     = "toggle_recording";
     pub const SWITCH_SIDES: &str         = "switch_sides";
     pub const CLOSE_TAB: &str            = "close_tab";
     pub const TOGGLE_TOOLBAR: &str       = "toggle_toolbar";
@@ -62,6 +62,7 @@ pub mod action_id {
     pub const TOGGLE_LOCK_AFTER_SESSION_END: &str = "toggle_lock_after_session_end";
     pub const TOGGLE_TRUE_COLOR: &str         = "toggle_true_color";
     pub const TOGGLE_SWAP_CTRL_CMD: &str      = "toggle_swap_ctrl_cmd";
+    pub const TOGGLE_ENABLE_FILE_COPY_PASTE: &str = "toggle_enable_file_copy_paste";
     pub const VIEW_MODE_CUSTOM: &str          = "view_mode_custom";
     pub const IMAGE_QUALITY_BEST: &str        = "image_quality_best";
     pub const IMAGE_QUALITY_BALANCED: &str    = "image_quality_balanced";
@@ -69,6 +70,7 @@ pub mod action_id {
     pub const SEND_CLIPBOARD_KEYSTROKES: &str = "send_clipboard_keystrokes";
     pub const SWITCH_TAB_NEXT: &str           = "switch_tab_next";
     pub const SWITCH_TAB_PREV: &str           = "switch_tab_prev";
+    pub const TOGGLE_VOICE_CALL: &str         = "toggle_voice_call";
     pub const TOGGLE_VIEW_ONLY: &str          = "toggle_view_only";
 }
 
@@ -245,7 +247,7 @@ pub fn event_to_key_name(event: &rdev::Event) -> Option<String> {
 /// bindings). Call this once at startup and again whenever the config is
 /// written.
 pub fn reload_from_config() {
-    let raw = base::config::LocalConfig::get_option(LOCAL_CONFIG_KEY);
+    let raw = hbb_common::config::LocalConfig::get_option(LOCAL_CONFIG_KEY);
     #[cfg(target_os = "linux")]
     let is_wayland = crate::platform::linux::current_is_wayland();
     #[cfg(not(target_os = "linux"))]
@@ -286,10 +288,11 @@ fn action_available_on_platform(action: &str, platform: &str, is_wayland: bool) 
         action_id::TOGGLE_FULLSCREEN | action_id::SCREENSHOT | action_id::SWITCH_TAB_NEXT
         | action_id::SWITCH_TAB_PREV | action_id::CLOSE_TAB | action_id::SWITCH_SIDES
         | action_id::TOGGLE_TOOLBAR | action_id::PIN_TOOLBAR | action_id::SWITCH_DISPLAY_ALL
-        | action_id::KEYBOARD_MODE_MAP
+        | action_id::TOGGLE_ENABLE_FILE_COPY_PASTE | action_id::KEYBOARD_MODE_MAP
         | action_id::KEYBOARD_MODE_TRANSLATE | action_id::KEYBOARD_MODE_LEGACY
         | action_id::TOGGLE_SHOW_MY_CURSOR | action_id::TOGGLE_ZOOM_CURSOR => !mobile,
         action_id::RESET_CANVAS => mobile,
+        action_id::TOGGLE_RECORDING | action_id::TOGGLE_VOICE_CALL => platform != "ios",
         _ => true,
     }
 }
@@ -341,7 +344,7 @@ pub fn match_event(event: &rdev::Event) -> Option<String> {
             Ok(true) => return None,
             Ok(false) => {}
             Err(err) => {
-                base::throttled_log!(std::time::Duration::from_secs(5), warn,
+                hbb_common::throttled_log!(std::time::Duration::from_secs(5), warn,
                     "Cannot identify AltGraph for keyboard shortcuts: {}", err);
                 return None;
             }
@@ -368,10 +371,10 @@ lazy_static::lazy_static! {
     /// Actions waiting for the release of the key that fired them, with the
     /// session that fired them. See `runs_on_release`.
     static ref RELEASE_ACTIONS: std::sync::Mutex<
-        std::collections::HashMap<rdev::Key, (SessionID, String)>,
+        std::collections::HashMap<rdev::Key, (hbb_common::SessionID, String)>,
     > = Default::default();
     static ref RELEASED_MODIFIERS: std::sync::Mutex<
-        std::collections::HashMap<SessionID, std::collections::HashMap<rdev::Key, rdev::Event>>,
+        std::collections::HashMap<hbb_common::SessionID, std::collections::HashMap<rdev::Key, rdev::Event>>,
     > = Default::default();
 }
 
@@ -401,7 +404,7 @@ pub fn runs_on_release(action_id: &str) -> bool {
 /// still owes on key release. Fired keys are physical and stay owned until
 /// their release, whichever session gets it.
 #[cfg(feature = "flutter")]
-pub fn clear_session_state(session_id: &SessionID) {
+pub fn clear_session_state(session_id: &hbb_common::SessionID) {
     RELEASE_ACTIONS.lock().unwrap().retain(|_, (sid, _)| sid != session_id);
     let held = RELEASED_MODIFIERS.lock().unwrap().remove(session_id);
     if let Some(held) = held {
@@ -436,7 +439,7 @@ pub(super) fn release_modifier_on_leave(key: rdev::Key) -> bool {
 }
 
 #[cfg(feature = "flutter")]
-pub fn enter_view_only(session_id: &SessionID) {
+pub fn enter_view_only(session_id: &hbb_common::SessionID) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if super::IS_RDEV_ENABLED.load(std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -449,7 +452,7 @@ pub fn enter_view_only(session_id: &SessionID) {
 }
 
 #[cfg(feature = "flutter")]
-pub fn transfer_released_modifiers(from: &SessionID, to: &SessionID) {
+pub fn transfer_released_modifiers(from: &hbb_common::SessionID, to: &hbb_common::SessionID) {
     if from == to {
         return;
     }
@@ -475,7 +478,7 @@ pub fn transfer_released_modifiers(from: &SessionID, to: &SessionID) {
 /// remote key releases go to the session the chord was typed into.
 #[cfg(feature = "flutter")]
 pub fn try_dispatch(
-    session_id: Option<&SessionID>,
+    session_id: Option<&hbb_common::SessionID>,
     event: &rdev::Event,
     keyboard_mode: &str,
     peer: impl FnOnce() -> String,
@@ -551,7 +554,7 @@ pub fn try_dispatch(
 }
 
 #[cfg(feature = "flutter")]
-fn push_shortcut_event(session_id: &SessionID, action_id: &str) {
+fn push_shortcut_event(session_id: &hbb_common::SessionID, action_id: &str) {
     if let Some(session) = crate::flutter::sessions::get_session_by_session_id(session_id) {
         session.ui_handler.push_event_to(
             "shortcut_triggered",
@@ -563,7 +566,7 @@ fn push_shortcut_event(session_id: &SessionID, action_id: &str) {
 
 #[cfg(feature = "flutter")]
 fn restore_remote_modifiers(
-    session_id: &SessionID,
+    session_id: &hbb_common::SessionID,
     event: &rdev::Event,
     keyboard_mode: &str,
     peer: impl FnOnce() -> String,
@@ -623,7 +626,7 @@ fn release_remote_non_modifiers(
 /// `send` instead of the globally current session.
 #[cfg(feature = "flutter")]
 fn release_remote_keys(
-    session_id: &SessionID,
+    session_id: &hbb_common::SessionID,
     keyboard_mode: &str,
     peer: &str,
     send: &impl Fn(&base::message_proto::KeyEvent),
@@ -969,6 +972,7 @@ mod tests {
         let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let actions = [action_id::SWITCH_DISPLAY_ALL, action_id::KEYBOARD_MODE_MAP,
             action_id::TOGGLE_SHOW_MY_CURSOR, action_id::TOGGLE_ZOOM_CURSOR,
+            action_id::TOGGLE_RECORDING, action_id::TOGGLE_VOICE_CALL,
             action_id::RESET_CANVAS, action_id::TOGGLE_MUTE, action_id::SEND_CTRL_ALT_DEL];
         let saved = Bindings { enabled: true, pass_through: false,
             bindings: actions.iter().map(|action| Binding {
@@ -976,7 +980,8 @@ mod tests {
             }).collect() };
         let raw = serde_json::to_string(&saved).unwrap();
         for (platform, expected) in [
-            ("android", vec![action_id::RESET_CANVAS, action_id::TOGGLE_MUTE, action_id::SEND_CTRL_ALT_DEL]),
+            ("android", vec![action_id::TOGGLE_RECORDING, action_id::TOGGLE_VOICE_CALL,
+                action_id::RESET_CANVAS, action_id::TOGGLE_MUTE, action_id::SEND_CTRL_ALT_DEL]),
             ("ios", vec![action_id::RESET_CANVAS, action_id::TOGGLE_MUTE, action_id::SEND_CTRL_ALT_DEL]),
             ("macos", actions.iter().copied().filter(|a| *a != action_id::RESET_CANVAS).collect()),
         ] {
@@ -1069,7 +1074,7 @@ mod tests {
 
         let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let chord = enable_defaults_and_hold_chord();
-        let dispatch = |sid: &SessionID, e: &rdev::Event| {
+        let dispatch = |sid: &hbb_common::SessionID, e: &rdev::Event| {
             try_dispatch(Some(sid), e, "map", || "windows".into(), |_| {})
         };
 
@@ -1502,7 +1507,7 @@ mod tests {
                 Binding { action: action_id::SCREENSHOT.into(), mods: prefix(), key: "p".into() },
             ],
         });
-        let dispatch = |sid: &SessionID, e: &rdev::Event| {
+        let dispatch = |sid: &hbb_common::SessionID, e: &rdev::Event| {
             try_dispatch(Some(sid), e, "map", || "windows".into(), |_| {})
         };
         let pending_for = |k: Key| RELEASE_ACTIONS.lock().unwrap().get(&k).cloned();
@@ -1559,9 +1564,9 @@ mod tests {
     }
 
     #[cfg(feature = "flutter")]
-    const SID_A: SessionID = SessionID::from_u128(0xA);
+    const SID_A: hbb_common::SessionID = hbb_common::SessionID::from_u128(0xA);
     #[cfg(feature = "flutter")]
-    const SID_B: SessionID = SessionID::from_u128(0xB);
+    const SID_B: hbb_common::SessionID = hbb_common::SessionID::from_u128(0xB);
 
     #[cfg(feature = "flutter")]
     fn fired_keys() -> std::collections::HashSet<rdev::Key> {

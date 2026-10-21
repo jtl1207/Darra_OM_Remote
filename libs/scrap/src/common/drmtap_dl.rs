@@ -1,6 +1,6 @@
 // Runtime loader for libdrmtap.so (the DRM/KMS capture engine), dlopen'd so the binary carries no hard libdrm/libEGL/libGLESv2 dependency.
 
-use libloading::Library;
+use hbb_common::{libloading::Library, log};
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::OnceLock;
 
@@ -213,7 +213,7 @@ impl DrmtapLib {
             -1
         }
         DrmtapLib {
-            _lib: libloading::os::unix::Library::this().into(),
+            _lib: hbb_common::libloading::os::unix::Library::this().into(),
             open,
             close,
             list_displays,
@@ -268,7 +268,7 @@ impl DrmtapLib {
         // anyway. A root process that reaches the fallback has no bundled library, which is the
         // PipeWire-fallback case, not a reason to search.
         const DEV_ONLY: [&str; 2] = ["libdrmtap.so.0", "libdrmtap.so"];
-        let is_root = unsafe { libc::geteuid() } == 0;
+        let is_root = unsafe { hbb_common::libc::geteuid() } == 0;
         let candidates: Vec<&str> = if is_root {
             vec![INSTALLED]
         } else {

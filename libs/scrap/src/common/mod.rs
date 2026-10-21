@@ -1,6 +1,6 @@
 pub use self::vpxcodec::*;
 use base::message_proto::{video_frame, Chroma, VideoFrame};
-use anyhow::{bail, Result as ResultType};
+use hbb_common::{bail, log, ResultType};
 use std::{ffi::c_void, slice};
 
 cfg_if! {
@@ -54,6 +54,7 @@ pub const HW_STRIDE_ALIGN: usize = 0; // recommended by av_frame_get_buffer
 pub mod aom;
 #[cfg(not(any(target_os = "ios")))]
 pub mod camera;
+pub mod record;
 mod vpx;
 
 #[repr(usize)]

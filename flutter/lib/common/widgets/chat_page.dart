@@ -38,6 +38,10 @@ class ChatPage extends StatelessWidget implements PageShape {
           return chatModel.messages.entries.map((entry) {
             final key = entry.key;
             final user = entry.value.chatUser;
+            final client = gFFI.serverModel.clients
+                .firstWhereOrNull((e) => e.id == key.connId);
+            final connected =
+                gFFI.serverModel.clients.any((e) => e.id == key.connId);
             return PopupMenuItem<MessageKey>(
               child: Row(
                 children: [
@@ -48,6 +52,17 @@ class ChatPage extends StatelessWidget implements PageShape {
                           color: MyTheme.accent)
                       .marginOnly(right: 6),
                   Text("${user.firstName}   ${user.id}"),
+                  if (connected)
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Color.fromARGB(255, 46, 205, 139)),
+                    ).marginSymmetric(horizontal: 2),
+                  if (client != null)
+                    unreadMessageCountBuilder(client.unreadChatMessageCount)
+                        .marginOnly(left: 4)
                 ],
               ),
               value: key,
@@ -68,7 +83,16 @@ class ChatPage extends StatelessWidget implements PageShape {
         child: Consumer<ChatModel>(
           builder: (context, chatModel, child) {
             final readOnly = type == ChatPageType.mobileMain &&
-                chatModel.currentKey.connId == ChatModel.clientModeID;
+                    (chatModel.currentKey.connId == ChatModel.clientModeID ||
+                        gFFI.serverModel.clients.every((e) =>
+                            e.id != chatModel.currentKey.connId ||
+                            chatModel.currentUser == null)) ||
+                type == ChatPageType.desktopCM &&
+                    gFFI.serverModel.clients
+                            .firstWhereOrNull(
+                                (e) => e.id == chatModel.currentKey.connId)
+                            ?.disconnected ==
+                        true;
             return Stack(
               children: [
                 LayoutBuilder(builder: (context, constraints) {

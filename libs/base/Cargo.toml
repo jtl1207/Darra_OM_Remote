@@ -4,7 +4,8 @@ version = "0.1.0"
 authors = ["rustdesk <info@rustdesk.com>"]
 edition = "2018"
 
-# 仅 RustDesk 自身使用的代码(共享给服务端的部分不再有独立 crate)。
+# Code that only RustDesk itself uses. `hbb_common` stays the crate shared with
+# the server, so anything the server never touches belongs here instead.
 
 [features]
 default = []
@@ -14,6 +15,7 @@ default = []
 wayland_probe = []
 
 [dependencies]
+hbb_common = { path = "../hbb_common" }
 protobuf = { version = "3.7", features = ["with-bytes"] }
 # the generated protobuf code refers to `::bytes::Bytes` (tokio_bytes codegen)
 bytes = { version = "1.10", features = ["serde"] }
@@ -27,21 +29,6 @@ backtrace = "0.3"
 log = "0.4"
 lazy_static = "1.5"
 anyhow = "1.0"
-# 共同件收编依赖(原 hbb_common 同源)
-env_logger = "0.11"
-flexi_logger = { version = "0.27", features = ["async"] }
-futures-util = "0.3"
-directories-next = "2.0"
-rand = "0.8"
-confy = "0.5"
-sodiumoxide = "0.2"
-dlopen = "0.1"
-thiserror = "1.0"
-base64 = "0.22"
-whoami = "1.5"
-regex = "1.11"
-sha2 = "0.10"
-sysinfo = { git = "https://github.com/rustdesk-org/sysinfo", branch = "rlim_max" }
 
 [build-dependencies]
 protobuf-codegen = { version = "3.7" }
@@ -68,4 +55,3 @@ sctk = { package = "smithay-client-toolkit", version = "0.20.0", default-feature
     "calloop",
 ] }
 users = { version = "0.11" }
-x11 = "2.21"

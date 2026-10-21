@@ -1,4 +1,4 @@
-use regex::Regex;
+use hbb_common::regex::Regex;
 use lazy_static::lazy_static;
 use std::sync::Mutex;
 use std::{
@@ -213,7 +213,7 @@ fn endpoint_named() -> bool {
 
 // Enumerates and keeps the failure stamp current. Suppresses nothing itself: one-shot callers
 // (session init, pipewire) must always get a fresh read, or a transient failure latches.
-fn enumerate_displays() -> anyhow::Result<Vec<WaylandDisplayInfo>> {
+fn enumerate_displays() -> hbb_common::ResultType<Vec<WaylandDisplayInfo>> {
     // Read before connecting, which consumes WAYLAND_SOCKET.
     #[cfg(feature = "drm")]
     let named = endpoint_named();

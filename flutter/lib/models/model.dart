@@ -14,11 +14,15 @@ import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
-import 'package:flutter_hbb/models/om_auth.dart';
+import 'package:flutter_hbb/models/cm_file_model.dart';
+import 'package:flutter_hbb/models/file_model.dart';
+import 'package:flutter_hbb/models/group_model.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/printer_model.dart';
+import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/models/shortcut_model.dart';
+import 'package:flutter_hbb/models/user_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/models/desktop_render_texture.dart';
 import 'package:flutter_hbb/models/terminal_model.dart';
@@ -53,6 +57,7 @@ final _constSessionId = Uuid().v4obj();
 const _restartReconnectSilentDelaySecs = 5;
 
 class CachedPeerData {
+  Map<String, dynamic> updatePrivacyMode = {};
   Map<String, dynamic> peerInfo = {};
   // No shapes: the core keeps them for the session, and the window a tab moves to asks it
   // for the one in use.
@@ -68,6 +73,7 @@ class CachedPeerData {
   @override
   String toString() {
     return jsonEncode({
+      'updatePrivacyMode': updatePrivacyMode,
       'peerInfo': peerInfo,
       'lastCursorId': lastCursorId,
       'permissions': permissions,
@@ -81,6 +87,7 @@ class CachedPeerData {
     try {
       final map = jsonDecode(s);
       final data = CachedPeerData();
+      data.updatePrivacyMode = map['updatePrivacyMode'];
       data.peerInfo = map['peerInfo'];
       data.lastCursorId = map['lastCursorId'];
       map['permissions'].forEach((key, value) {
@@ -311,6 +318,7 @@ class FfiModel with ChangeNotifier {
       'text': kMsgboxTextWaitingForImage,
       'link': '',
     }, sessionId, peerId);
+    updatePrivacyMode(data.updatePrivacyMode, sessionId, peerId);
     setConnectionType(peerId, data.secure, data.direct, data.streamType);
     await handlePeerInfo(data.peerInfo, peerId, true);
     if (data.lastCursorId.isNotEmpty) {
@@ -359,10 +367,41 @@ class FfiModel with ChangeNotifier {
             .receive(int.parse(evt['id'] as String), evt['text'] ?? '');
       } else if (name == 'terminal_response') {
         parent.target?.routeTerminalResponse(evt);
+      } else if (name == 'file_dir') {
+        parent.target?.fileModel.receiveFileDir(evt);
+      } else if (name == 'empty_dirs') {
+        parent.target?.fileModel.receiveEmptyDirs(evt);
+      } else if (name == 'job_progress') {
+        parent.target?.fileModel.jobController.tryUpdateJobProgress(evt);
+      } else if (name == 'job_done') {
+        bool? refresh =
+            await parent.target?.fileModel.jobController.jobDone(evt);
+        if (refresh == true) {
+          // many job done for delete directory
+          // todo: refresh may not work when confirm delete local directory
+          parent.target?.fileModel.refreshAll();
+        }
+      } else if (name == 'job_error') {
+        parent.target?.fileModel.handleJobError(evt);
+      } else if (name == 'override_file_confirm') {
+        parent.target?.fileModel.postOverrideFileConfirm(evt);
+      } else if (name == 'load_last_job') {
+        parent.target?.fileModel.jobController.loadLastJob(evt);
+      } else if (name == 'update_folder_files') {
+        parent.target?.fileModel.jobController.updateFolderFiles(evt);
+      } else if (name == 'add_connection') {
+        parent.target?.serverModel.addConnection(evt);
+      } else if (name == 'on_client_remove') {
+        parent.target?.serverModel.onClientRemove(evt);
       } else if (name == 'update_quality_status') {
         parent.target?.qualityMonitorModel.updateQualityStatus(evt);
       } else if (name == 'update_block_input_state') {
         updateBlockInputState(evt, peerId);
+      } else if (name == 'update_privacy_mode') {
+        updatePrivacyMode(evt, sessionId, peerId);
+      } else if (name == 'show_elevation') {
+        final show = evt['show'].toString() == 'true';
+        parent.target?.serverModel.setShowElevation(show);
       } else if (name == 'cancel_msgbox') {
         cancelMsgBox(evt, sessionId);
       } else if (name == 'switch_back') {
@@ -374,6 +413,21 @@ class FfiModel with ChangeNotifier {
       } else if (name == 'on_url_scheme_received') {
         // currently comes from "_url" ipc of mac and dbus of linux
         onUrlSchemeReceived(evt);
+      } else if (name == 'on_voice_call_waiting') {
+        // Waiting for the response from the peer.
+        parent.target?.chatModel.onVoiceCallWaiting();
+      } else if (name == 'on_voice_call_started') {
+        // Voice call is connected.
+        parent.target?.chatModel.onVoiceCallStarted();
+      } else if (name == 'on_voice_call_closed') {
+        // Voice call is closed with reason.
+        final reason = evt['reason'].toString();
+        parent.target?.chatModel.onVoiceCallClosed(reason);
+      } else if (name == 'on_voice_call_incoming') {
+        // Voice call is requested by the peer.
+        parent.target?.chatModel.onVoiceCallIncoming();
+      } else if (name == 'update_voice_call_state') {
+        parent.target?.serverModel.updateVoiceCallState(evt);
       } else if (name == 'fingerprint') {
         FingerprintState.find(peerId).value = evt['fingerprint'] ?? '';
       } else if (name == "sync_peer_hash_password_to_personal_ab") {
@@ -385,12 +439,24 @@ class FfiModel with ChangeNotifier {
                 .changePersonalHashPassword(id.toString(), hash.toString());
           }
         }
+      } else if (name == "cm_file_transfer_log") {
+        if (isDesktop) {
+          gFFI.cmFileModel.onFileTransferLog(evt);
+        }
       } else if (name == 'sync_peer_option') {
         _handleSyncPeerOption(evt, peerId);
       } else if (name == 'follow_current_display') {
         handleFollowCurrentDisplay(evt, sessionId, peerId);
       } else if (name == 'use_texture_render') {
         _handleUseTextureRender(evt, sessionId, peerId);
+      } else if (name == "selected_files") {
+        if (isWeb) {
+          parent.target?.fileModel.onSelectedFiles(evt);
+        }
+      } else if (name == "send_emptry_dirs") {
+        if (isWeb) {
+          parent.target?.fileModel.sendEmptyDirs(evt);
+        }
       } else if (name == "record_status") {
         if (desktopType == DesktopType.remote ||
             desktopType == DesktopType.viewCamera ||
@@ -850,6 +916,8 @@ class FfiModel with ChangeNotifier {
 
     if (type == 're-input-password') {
       wrongPasswordDialog(sessionId, dialogManager, type, title, text);
+    } else if (type == 'input-2fa') {
+      enter2FaDialog(sessionId, dialogManager);
     } else if (type == 'input-password') {
       enterPasswordDialog(sessionId, dialogManager);
     } else if (type == 'terminal-admin-login') {
@@ -894,6 +962,10 @@ class FfiModel with ChangeNotifier {
       showRelayHintDialog(sessionId, type, title, text, dialogManager, peerId);
     } else if (text == kMsgboxTextWaitingForImage) {
       showConnectedWaitingForImage(dialogManager, sessionId, type, title, text);
+    } else if (title == 'Privacy mode') {
+      final hasRetry = evt['hasRetry'] == 'true';
+      showPrivacyFailedDialog(
+          sessionId, type, title, text, link, hasRetry, dialogManager);
     } else {
       var hasRetry = evt['hasRetry'] == 'true';
       if (!hasRetry) {
@@ -1134,6 +1206,22 @@ class FfiModel with ChangeNotifier {
     bind.sessionOnWaitingForImageDialogShow(sessionId: sessionId);
   }
 
+  void showPrivacyFailedDialog(
+      SessionID sessionId,
+      String type,
+      String title,
+      String text,
+      String link,
+      bool hasRetry,
+      OverlayDialogManager dialogManager) {
+    // There are display changes on the remote side,
+    // which will cause some messages to refresh the canvas and dismiss dialogs.
+    // So we add a delay here to ensure the dialog is displayed.
+    Future.delayed(Duration(milliseconds: 3000), () {
+      showMsgBox(sessionId, type, title, text, link, hasRetry, dialogManager);
+    });
+  }
+
   _updateSessionWidthHeight(SessionID sessionId) {
     if (_rect == null) return;
     if (_rect!.width <= 0 || _rect!.height <= 0) {
@@ -1162,8 +1250,99 @@ class FfiModel with ChangeNotifier {
     }
   }
 
+  void _queryAuditGuid(String peerId) async {
+    try {
+      if (bind.isDisableAccount()) {
+        return;
+      }
+      if (bind
+          .sessionGetAuditServerSync(sessionId: sessionId, typ: "conn/active")
+          .isEmpty) {
+        return;
+      }
+      if (!mainGetLocalBoolOptionSync(
+          kOptionAllowAskForNoteAtEndOfConnection)) {
+        return;
+      }
+      if (bind.sessionGetAuditGuid(sessionId: sessionId).isNotEmpty) {
+        debugPrint('Get cached audit GUID');
+        return;
+      }
+      final url = bind.sessionGetAuditServerSync(
+          sessionId: sessionId, typ: "conn/active");
+      if (url.isEmpty) {
+        return;
+      }
+      final initialConnSessionId =
+          bind.sessionGetConnSessionId(sessionId: sessionId);
+      final connType = switch (parent.target?.connType) {
+        ConnType.defaultConn => 0,
+        ConnType.fileTransfer => 1,
+        ConnType.portForward => 2,
+        ConnType.rdp => 2,
+        ConnType.viewCamera => 3,
+        ConnType.terminal => 4,
+        _ => 0,
+      };
+
+      const retryIntervals = [1, 1, 2, 2, 3, 3];
+
+      for (int attempt = 1; attempt <= retryIntervals.length; attempt++) {
+        final currentConnSessionId =
+            bind.sessionGetConnSessionId(sessionId: sessionId);
+        if (currentConnSessionId != initialConnSessionId) {
+          debugPrint('connSessionId changed, stopping audit GUID query');
+          return;
+        }
+
+        final fullUrl =
+            '$url?id=$peerId&session_id=$currentConnSessionId&conn_type=$connType';
+
+        debugPrint(
+            'Querying audit GUID, attempt $attempt/${retryIntervals.length}');
+        try {
+          var headers = getHttpHeaders();
+          headers['Content-Type'] = "application/json";
+
+          final response = await http.get(
+            Uri.parse(fullUrl),
+            headers: headers,
+          );
+
+          if (response.statusCode == 200) {
+            final guid = jsonDecode(response.body) as String?;
+            if (guid != null && guid.isNotEmpty) {
+              bind.sessionSetAuditGuid(sessionId: sessionId, guid: guid);
+              debugPrint('Successfully retrieved audit GUID');
+              return;
+            }
+          } else {
+            debugPrint(
+                'Failed to query audit GUID. Status: ${response.statusCode}, Body: ${response.body}');
+            return;
+          }
+        } catch (e) {
+          debugPrint('Error querying audit GUID (attempt $attempt): $e');
+        }
+
+        if (attempt < retryIntervals.length) {
+          await Future.delayed(Duration(seconds: retryIntervals[attempt - 1]));
+        }
+      }
+
+      debugPrint(
+          'Failed to retrieve audit GUID after ${retryIntervals.length} attempts');
+    } catch (e) {
+      debugPrint('Error in _queryAuditGuid: $e');
+    }
+  }
+
   /// Handle the peer info event based on [evt].
   handlePeerInfo(Map<String, dynamic> evt, String peerId, bool isCache) async {
+    parent.target?.chatModel.voiceCallStatus.value = VoiceCallStatus.notStarted;
+
+    _queryAuditGuid(peerId);
+
     // Map clone is required here, otherwise "evt" may be changed by other threads through the reference.
     // Because this function is asynchronous, there's an "await" in this function.
     cachedPeerData.peerInfo = {...evt};
@@ -1231,7 +1410,9 @@ class FfiModel with ChangeNotifier {
     if (isMobile) {
       virtualMouseMode.loadOptions();
     }
-    if (connType == ConnType.terminal) {
+    if (connType == ConnType.fileTransfer) {
+      parent.target?.fileModel.onReady();
+    } else if (connType == ConnType.terminal) {
       // Call onReady on all registered terminal models
       final models = parent.target?._terminalModels.values ?? [];
       for (final model in models) {
@@ -1276,6 +1457,8 @@ class FfiModel with ChangeNotifier {
         waitForFirstImage.value = true;
         isRefreshing = false;
       }
+      Map<String, dynamic> features = json.decode(evt['features']);
+      _pi.features.privacyMode = features['privacy_mode'] == true;
       if (!isCache) {
         handleResolutions(peerId, evt["resolutions"]);
       }
@@ -1614,6 +1797,28 @@ class FfiModel with ChangeNotifier {
       //
     }
   }
+
+  updatePrivacyMode(
+      Map<String, dynamic> evt, SessionID sessionId, String peerId) async {
+    notifyListeners();
+    try {
+      final isOn = bind.sessionGetToggleOptionSync(
+          sessionId: sessionId, arg: 'privacy-mode');
+      if (isOn) {
+        var privacyModeImpl = await bind.sessionGetOption(
+            sessionId: sessionId, arg: 'privacy-mode-impl-key');
+        // For compatibility, version < 1.2.4, the default value is 'privacy_mode_impl_mag'.
+        final initDefaultPrivacyMode = 'privacy_mode_impl_mag';
+        PrivacyModeState.find(peerId).value =
+            privacyModeImpl ?? initDefaultPrivacyMode;
+      } else {
+        PrivacyModeState.find(peerId).value = '';
+      }
+    } catch (e) {
+      //
+    }
+  }
+
   void setViewOnly(String id, bool value) {
     if (versionCmp(_pi.version, '1.2.0') < 0) return;
     // tmp fix for https://github.com/rustdesk/rustdesk/pull/3706#issuecomment-1481242389
@@ -1933,15 +2138,6 @@ class ViewStyle {
     );
   }
 
-  /// 视图样式归一: 会话未显式设置(空)时, 移动端补 [kRemoteViewStyleAdaptive]
-  /// (等比 contain, 不拉伸不裁切, 横竖屏自适应), 桌面保持空值走现状 1.0 缩放。
-  static String resolveStyle(String? raw) {
-    final s = raw ?? '';
-    if (s.isNotEmpty) return s;
-    final desktop = (isDesktop || isWebDesktop);
-    return desktop ? s : kRemoteViewStyleAdaptive;
-  }
-
   static int _double2Int(double v) => (v * 100).round().toInt();
 
   @override
@@ -2186,12 +2382,10 @@ class CanvasModel with ChangeNotifier {
   updateSize() => _size = getSize();
 
   updateViewStyle({refreshMousePos = true, notify = true}) async {
-    final raw = await bind.sessionGetViewStyle(sessionId: sessionId);
-    if (raw == null) {
+    final style = await bind.sessionGetViewStyle(sessionId: sessionId);
+    if (style == null) {
       return;
     }
-    // 未设置时移动端归一为 adaptive (等比 contain), 横竖屏切换重算即自动适配。
-    final style = ViewStyle.resolveStyle(raw);
 
     updateSize();
     final displayWidth = getDisplayWidth();
@@ -3847,13 +4041,18 @@ class FFI {
   late final FfiModel ffiModel; // session
   late final CursorModel cursorModel; // session
   late final CanvasModel canvasModel; // session
+  late final ServerModel serverModel; // global
   late final ChatModel chatModel; // session
+  late final FileModel fileModel; // session
   late final AbModel abModel; // global
+  late final GroupModel groupModel; // global
+  late final UserModel userModel; // global
   late final PeerTabModel peerTabModel; // global
   late final QualityMonitorModel qualityMonitorModel; // session
   late final RecordingModel recordingModel; // session
   late final InputModel inputModel; // session
   late final ElevationModel elevationModel; // session
+  late final CmFileModel cmFileModel; // cm
   late final TextureModel textureModel; //session
   late final ShortcutModel shortcutModel; // session
   late final Peers recentPeersModel; // global
@@ -3872,13 +4071,18 @@ class FFI {
     ffiModel = FfiModel(WeakReference(this));
     cursorModel = CursorModel(WeakReference(this));
     canvasModel = CanvasModel(WeakReference(this));
+    serverModel = ServerModel(WeakReference(this));
     chatModel = ChatModel(WeakReference(this));
+    fileModel = FileModel(WeakReference(this));
+    userModel = UserModel(WeakReference(this));
     peerTabModel = PeerTabModel(WeakReference(this));
     abModel = AbModel(WeakReference(this));
+    groupModel = GroupModel(WeakReference(this));
     qualityMonitorModel = QualityMonitorModel(WeakReference(this));
     recordingModel = RecordingModel(WeakReference(this));
     inputModel = InputModel(WeakReference(this));
     elevationModel = ElevationModel(WeakReference(this));
+    cmFileModel = CmFileModel(WeakReference(this));
     textureModel = TextureModel(WeakReference(this));
     shortcutModel = ShortcutModel(WeakReference(this));
     recentPeersModel = Peers(
@@ -3903,10 +4107,12 @@ class FFI {
     ffiModel.waitForImageTimer = null;
   }
 
-  /// Start with the given [id]. Only view camera if [isViewCamera], only terminal if [isTerminal].
+  /// Start with the given [id]. Only transfer file if [isFileTransfer], only view camera if [isViewCamera], only port forward if [isPortForward].
   void start(
     String id, {
+    bool isFileTransfer = false,
     bool isViewCamera = false,
+    bool isPortForward = false,
     bool isRdp = false,
     bool isTerminal = false,
     String? switchUuid,
@@ -3920,9 +4126,20 @@ class FFI {
   }) {
     closed = false;
     if (isMobile) mobileReset();
-    assert(!(isTerminal && isViewCamera), 'more than one connect type');
-    if (isViewCamera) {
+    assert(
+        (!(isPortForward && isViewCamera)) &&
+            (!(isViewCamera && isPortForward)) &&
+            (!(isPortForward && isFileTransfer)) &&
+            (!(isTerminal && isFileTransfer)) &&
+            (!(isTerminal && isViewCamera)) &&
+            (!(isTerminal && isPortForward)),
+        'more than one connect type');
+    if (isFileTransfer) {
+      connType = ConnType.fileTransfer;
+    } else if (isViewCamera) {
       connType = ConnType.viewCamera;
+    } else if (isPortForward) {
+      connType = ConnType.portForward;
     } else if (isTerminal) {
       connType = ConnType.terminal;
     } else {
@@ -3941,17 +4158,16 @@ class FFI {
       final addRes = bind.sessionAddSync(
         sessionId: sessionId,
         id: id,
-        isFileTransfer: false,
+        isFileTransfer: isFileTransfer,
         isViewCamera: isViewCamera,
-        isPortForward: false,
+        isPortForward: isPortForward,
         isRdp: isRdp,
         isTerminal: isTerminal,
         switchUuid: switchUuid ?? '',
         forceRelay: forceRelay ?? false,
         password: password ?? '',
         isSharedPassword: isSharedPassword ?? false,
-        // FFI.start 同步: token 未显式传入时取登录内存令牌,供 Rust 侧拉起 SessionHost。
-        connToken: connToken ?? OmAuth.instance.accessToken,
+        connToken: connToken,
       );
     } else if (display != null) {
       if (displays == null) {
@@ -4150,6 +4366,11 @@ class FFI {
         remember: remember);
   }
 
+  void send2FA(SessionID sessionId, String code, bool trustThisDevice) {
+    bind.sessionSend2Fa(
+        sessionId: sessionId, code: code, trustThisDevice: trustThisDevice);
+  }
+
   /// Close the remote session.
   Future<void> close({bool closeSession = true}) async {
     closed = true;
@@ -4282,6 +4503,10 @@ class Resolution {
   }
 }
 
+class Features {
+  bool privacyMode = false;
+}
+
 const kInvalidDisplayIndex = -1;
 
 class PeerInfo with ChangeNotifier {
@@ -4294,6 +4519,7 @@ class PeerInfo with ChangeNotifier {
   int currentDisplay = 0;
   int primaryDisplay = kInvalidDisplayIndex;
   RxList<Display> displays = <Display>[].obs;
+  Features features = Features();
   List<Resolution> resolutions = [];
   Map<String, dynamic> platformAdditions = {};
 

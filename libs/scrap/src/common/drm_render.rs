@@ -5,6 +5,7 @@
 
 use super::drmtap_dl::{self, drmtap_ctx, drmtap_dmabuf_desc, drmtap_frame_info, DrmtapLib};
 use super::Pixfmt;
+use hbb_common::log;
 use std::ffi::CString;
 use std::io;
 use std::os::fd::RawFd;
@@ -114,9 +115,9 @@ impl RenderConverter {
             let ret = convert_dmabuf(self.ctx, &*desc as *const drmtap_dmabuf_desc, &mut frame);
             if ret < 0 {
                 let errno = -ret;
-                if errno == libc::EAGAIN
-                    || errno == libc::EBUSY
-                    || errno == libc::EINTR
+                if errno == hbb_common::libc::EAGAIN
+                    || errno == hbb_common::libc::EBUSY
+                    || errno == hbb_common::libc::EINTR
                 {
                     return Err(io::ErrorKind::WouldBlock.into());
                 }

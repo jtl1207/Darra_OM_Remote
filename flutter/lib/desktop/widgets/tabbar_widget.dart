@@ -27,7 +27,7 @@ const double _kDividerIndent = 10;
 const double _kActionIconSize = 12;
 
 class TabInfo {
-  final String key; // 会话页以 peer id 作为 key
+  final String key; // Notice: cm use client_id.toString() as key
   final String label;
   final IconData? selectedIcon;
   final IconData? unselectedIcon;
@@ -49,9 +49,13 @@ class TabInfo {
 
 enum DesktopTabType {
   main,
+  cm,
   remoteScreen,
+  fileTransfer,
   viewCamera,
+  portForward,
   terminal,
+  install,
 }
 
 class DesktopTabState {
@@ -317,7 +321,10 @@ class _DesktopTabState extends State<DesktopTab>
   Rx<DesktopTabState> get state => controller.state;
 
   DesktopTabType get tabType => controller.tabType;
-  bool get isMainWindow => tabType == DesktopTabType.main;
+  bool get isMainWindow =>
+      tabType == DesktopTabType.main ||
+      tabType == DesktopTabType.cm ||
+      tabType == DesktopTabType.install;
 
   _DesktopTabState() : super();
 
@@ -411,9 +418,9 @@ class _DesktopTabState extends State<DesktopTab>
     }
   }
 
-  // Linux 上 GTK 收到关闭请求就会销毁窗口, 除非开启 prevent-close。
-  // 子窗口由 onActiveWindowChanged() 关闭 prevent-close 以退出,
-  // 之后窗口无法再保存或隐藏。
+  // On Linux, GTK destroys the window on a close request unless prevent-close
+  // is on. It is off for the cm and install windows, and onActiveWindowChanged()
+  // turns it off to quit, so the window can no longer be saved or hidden.
   // https://github.com/rustdesk/rustdesk/issues/16512
   Future<bool> _isLinuxWindowClosed() async =>
       isLinux && isMainWindow && !await windowManager.isPreventClose();
@@ -552,6 +559,13 @@ class _DesktopTabState extends State<DesktopTab>
             controller: state.value.pageController,
             physics: NeverScrollableScrollPhysics(),
             children: () {
+              if (DesktopTabType.cm == tabType) {
+                // Fix when adding a new tab still showing closed tabs with the same peer id, which would happen after the DesktopTab was stateful.
+                return state.value.tabs.map((tab) {
+                  return tab.page;
+                }).toList();
+              }
+
               /// to-do refactor, separate connection state and UI state for remote session.
               /// [workaround] PageView children need an immutable list, after it has been passed into PageView
               final tabLen = state.value.tabs.length;
@@ -560,7 +574,7 @@ class _DesktopTabState extends State<DesktopTab>
               } else if (_tabWidgets.isNotEmpty &&
                   tabLen == _tabWidgets.length + 1) {
                 /// On add. Use the previous list(pointer) to prevent item's state init twice.
-                /// *[_tabWidgets.isNotEmpty] 表示 TabsWindow(remote_tab_page) 之前打开过但被隐藏, 此时必须重新加载, 否则子项无法构建。
+                /// *[_tabWidgets.isNotEmpty] means TabsWindow(remote_tab_page or file_manager_tab_page) opened before, but was hidden. In this case, we have to reload, otherwise the child can't be built.
                 _tabWidgets.add(state.value.tabs.last.page);
                 return _tabWidgets;
               } else {
@@ -584,7 +598,8 @@ class _DesktopTabState extends State<DesktopTab>
   /// - hide single item when only has one item (home) on [DesktopTabPage].
   bool isHideSingleItem() {
     return state.value.tabs.length == 1 &&
-        controller.tabType == DesktopTabType.main;
+        (controller.tabType == DesktopTabType.main ||
+            controller.tabType == DesktopTabType.install);
   }
 
   Widget _buildBar() {
@@ -732,7 +747,10 @@ class WindowActionPanelState extends State<WindowActionPanel> {
   bool showTabDowndown() {
     return widget.tabController.state.value.tabs.length > 1 &&
         (widget.tabController.tabType == DesktopTabType.remoteScreen ||
-            widget.tabController.tabType == DesktopTabType.viewCamera);
+            widget.tabController.tabType == DesktopTabType.fileTransfer ||
+            widget.tabController.tabType == DesktopTabType.viewCamera ||
+            widget.tabController.tabType == DesktopTabType.portForward ||
+            widget.tabController.tabType == DesktopTabType.cm);
   }
 
   List<String> existingInvisibleTab() {
@@ -941,7 +959,8 @@ class _ListView extends StatelessWidget {
   /// - hide single item when only has one item (home) on [DesktopTabPage].
   bool isHideSingleItem() {
     return state.value.tabs.length == 1 &&
-        controller.tabType == DesktopTabType.main;
+            controller.tabType == DesktopTabType.main ||
+        controller.tabType == DesktopTabType.install;
   }
 
   onVisibilityChanged(VisibilityInfo info) {
@@ -1419,7 +1438,7 @@ class _TabDropDownButtonState extends State<_TabDropDownButton> {
 }
 
 bool _showTabBarBottomDivider(DesktopTabType tabType) {
-  return tabType == DesktopTabType.main;
+  return tabType == DesktopTabType.main || tabType == DesktopTabType.install;
 }
 
 class TabbarTheme extends ThemeExtension<TabbarTheme> {

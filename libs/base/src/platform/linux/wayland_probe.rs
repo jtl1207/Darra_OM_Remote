@@ -5,7 +5,7 @@
 //! and `get_wayland_displays` keeps its original behavior of returning the connect error.
 
 use super::{collect_wayland_displays, get_values_of_seat0_with_gdm_wayland, WaylandDisplayInfo};
-use anyhow::{bail, Result as ResultType};
+use hbb_common::{bail, ResultType};
 use sctk::reexports::client::Connection;
 use std::path::{Path, PathBuf};
 

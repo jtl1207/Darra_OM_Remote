@@ -1,6 +1,7 @@
-use anyhow::Result as ResultType;
-// 命令路径常量与 shell 执行助手在本文件内定义(原 hbb_common::sh 迁入,
-// 保持 platform::linux::CMD_SH 等调用方路径不变)。
+use hbb_common::ResultType;
+// Kept in hbb_common because `config::patch()` needs the shell lookup; re-exported
+// here so the long-standing `platform::linux::CMD_SH` paths are unchanged.
+pub use hbb_common::sh::{run_cmds_trim_newline, CMD_LOGINCTL, CMD_PS, CMD_SH};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -19,29 +20,6 @@ use sctk::{
 
 lazy_static::lazy_static! {
     pub static ref DISTRO: Distro = Distro::new();
-}
-
-// 命令路径按固定目录预查找,避免部分系统 fork 时产生审计日志。
-lazy_static::lazy_static! {
-    pub static ref CMD_LOGINCTL: String = find_cmd_path("loginctl");
-    pub static ref CMD_PS: String = find_cmd_path("ps");
-    pub static ref CMD_SH: String = find_cmd_path("sh");
-}
-
-// 依次尝试 /bin、/usr/bin、which,都失败时退回裸命令名(原 hbb_common::sh 迁入)。
-fn find_cmd_path(cmd: &'static str) -> String {
-    for dir in ["/bin", "/usr/bin"] {
-        let test_cmd = format!("{}/{}", dir, cmd);
-        if std::path::Path::new(&test_cmd).exists() {
-            return test_cmd;
-        }
-    }
-    if let Ok(output) = std::process::Command::new("which").arg(cmd).output() {
-        if output.status.success() {
-            return String::from_utf8_lossy(&output.stdout).trim().to_string();
-        }
-    }
-    cmd.to_string()
 }
 
 pub const DISPLAY_SERVER_WAYLAND: &str = "wayland";
@@ -275,16 +253,6 @@ pub fn run_cmds(cmds: &str) -> ResultType<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-// 执行命令并去掉末尾一个换行(原 hbb_common::sh::run_cmds_trim_newline 迁入)。
-pub fn run_cmds_trim_newline(cmds: &str) -> ResultType<String> {
-    let out = run_cmds(cmds)?;
-    Ok(if out.ends_with('\n') {
-        out[..out.len() - 1].to_string()
-    } else {
-        out.to_string()
-    })
-}
-
 fn run_loginctl(args: Option<Vec<&str>>) -> std::io::Result<std::process::Output> {
     if std::env::var("FLATPAK_ID").is_ok() {
         let mut l_args = CMD_LOGINCTL.to_string();
@@ -341,7 +309,7 @@ pub fn system_message(title: &str, msg: &str, forever: bool) -> ResultType<()> {
             return Ok(());
         }
     }
-    anyhow::bail!("failed to post system message");
+    hbb_common::bail!("failed to post system message");
 }
 
 #[derive(Debug, Clone, serde_derive::Serialize, serde_derive::Deserialize)]

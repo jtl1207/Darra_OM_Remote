@@ -30,46 +30,24 @@ import 'package:window_size/window_size.dart' as window_size;
 
 import '../consts.dart';
 import 'common/widgets/overlay.dart';
+import 'mobile/pages/file_manager_page.dart';
 import 'mobile/pages/remote_page.dart';
 import 'mobile/pages/view_camera_page.dart';
 import 'mobile/pages/terminal_page.dart';
 import 'desktop/pages/remote_page.dart' as desktop_remote;
+import 'desktop/pages/file_manager_page.dart' as desktop_file_manager;
 import 'desktop/pages/view_camera_page.dart' as desktop_view_camera;
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/model.dart';
-import 'models/om_auth.dart';
 import 'models/platform_model.dart';
 
 import 'package:flutter_hbb/native/win32.dart'
     if (dart.library.html) 'package:flutter_hbb/web/win32.dart';
 import 'package:flutter_hbb/native/common.dart'
     if (dart.library.html) 'package:flutter_hbb/web/common.dart';
-export 'package:flutter_hbb/native/common.dart'
-    if (dart.library.html) 'package:flutter_hbb/web/common.dart'
-    show launchSessionHost;
 import 'package:flutter_hbb/utils/http_service.dart' as http;
 
 final globalKey = GlobalKey<NavigatorState>();
-
-enum PermissionAuthorizeType {
-  undetermined,
-  authorized,
-  denied, // and restricted
-}
-
-Future<PermissionAuthorizeType> osxCanRecordAudio() async {
-  int res = await kMacOSPermChannel.invokeMethod("canRecordAudio");
-  if (res > 0) {
-    return PermissionAuthorizeType.authorized;
-  } else if (res == 0) {
-    return PermissionAuthorizeType.undetermined;
-  } else {
-    return PermissionAuthorizeType.denied;
-  }
-}
-
-/// 预置密码警告: 密码策略已由 om-master 下发,无预置密码态,不展示警告。
-Widget buildPresetPasswordWarning() => const SizedBox.shrink();
 final navigationBarKey = GlobalKey();
 
 final isAndroid = isAndroid_;
@@ -125,9 +103,11 @@ final iconHardDrive = MemoryImage(Uint8List.fromList(base64Decode(
 enum DesktopType {
   main,
   remote,
+  fileTransfer,
   viewCamera,
   terminal,
   cm,
+  portForward,
 }
 
 bool isDoubleEqual(double a, double b) {
@@ -1253,7 +1233,7 @@ void msgBox(SessionID sessionId, String type, String title, String text,
       onSubmit.call();
     } else {
       // https://github.com/rustdesk/rustdesk/blob/5e9a31340b899822090a3731769ae79c6bf5f3e5/src/ui/common.tis#L263
-      if (!type.contains("custom")) {
+      if (!type.contains("custom") && desktopType != DesktopType.portForward) {
         closeConnection();
       }
     }
@@ -2261,7 +2241,10 @@ StreamSubscription? listenUniLinks({handleByFlutter = true}) {
 
 enum UriLinkType {
   remoteDesktop,
+  fileTransfer,
   viewCamera,
+  portForward,
+  rdp,
   terminal,
 }
 
@@ -2311,8 +2294,23 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
         id = args[i + 1];
         i++;
         break;
+      case '--file-transfer':
+        type = UriLinkType.fileTransfer;
+        id = args[i + 1];
+        i++;
+        break;
       case '--view-camera':
         type = UriLinkType.viewCamera;
+        id = args[i + 1];
+        i++;
+        break;
+      case '--port-forward':
+        type = UriLinkType.portForward;
+        id = args[i + 1];
+        i++;
+        break;
+      case '--rdp':
+        type = UriLinkType.rdp;
         id = args[i + 1];
         i++;
         break;
@@ -2352,9 +2350,27 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
               forceRelay: forceRelay);
         });
         break;
+      case UriLinkType.fileTransfer:
+        Future.delayed(Duration.zero, () {
+          rustDeskWinManager.newFileTransfer(id!,
+              password: password, forceRelay: forceRelay);
+        });
+        break;
       case UriLinkType.viewCamera:
         Future.delayed(Duration.zero, () {
           rustDeskWinManager.newViewCamera(id!,
+              password: password, forceRelay: forceRelay);
+        });
+        break;
+      case UriLinkType.portForward:
+        Future.delayed(Duration.zero, () {
+          rustDeskWinManager.newPortForward(id!, false,
+              password: password, forceRelay: forceRelay);
+        });
+        break;
+      case UriLinkType.rdp:
+        Future.delayed(Duration.zero, () {
+          rustDeskWinManager.newPortForward(id!, true,
               password: password, forceRelay: forceRelay);
         });
         break;
@@ -2378,7 +2394,10 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
   final options = [
     "connect",
     "play",
+    "file-transfer",
     "view-camera",
+    "port-forward",
+    "rdp",
     "terminal",
     "terminal-admin",
   ];
@@ -2411,6 +2430,29 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
       });
     }
     return null;
+  } else if (uri.authority == "password") {
+    if (isAndroid || isIOS) {
+      final allowDeepLinkPassword =
+          bind.mainGetBuildinOption(key: kOptionAllowDeepLinkPassword) == 'Y';
+      if (!allowDeepLinkPassword) {
+        debugPrint(
+            "Ignore rustdesk://password because $kOptionAllowDeepLinkPassword is not enabled.");
+        // Keep the user-facing error generic; detailed rejection reason is in debug logs.
+        // Delay toast to avoid missing overlay during cold-start deeplink handling.
+        Timer(Duration(seconds: 1), () {
+          showToast(translate('Failed'));
+        });
+        return null;
+      }
+      final password = uri.path.substring("/".length);
+      if (password.isNotEmpty) {
+        Timer(Duration(seconds: 1), () async {
+          final ok =
+              await bind.mainSetPermanentPasswordWithResult(password: password);
+          showToast(translate(ok ? 'Successful' : 'Failed'));
+        });
+      }
+    }
   } else if (options.contains(uri.authority)) {
     command = '--${uri.authority}';
     if (uri.path.length > 1) {
@@ -2444,7 +2486,10 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
     final password = queryParameters["password"];
 
     // Determine connection type based on command
-    if (command == '--view-camera') {
+    if (command == '--file-transfer') {
+      connect(Get.context!, id,
+          isFileTransfer: true, forceRelay: forceRelay, password: password);
+    } else if (command == '--view-camera') {
       connect(Get.context!, id,
           isViewCamera: true, forceRelay: forceRelay, password: password);
     } else if (command == '--terminal') {
@@ -2478,14 +2523,29 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
 }
 
 connectMainDesktop(String id,
-    {required bool isViewCamera,
+    {required bool isFileTransfer,
+    required bool isViewCamera,
     required bool isTerminal,
+    required bool isTcpTunneling,
+    required bool isRDP,
     bool? forceRelay,
     String? password,
     String? connToken,
     bool? isSharedPassword}) async {
-  if (isViewCamera) {
+  if (isFileTransfer) {
+    await rustDeskWinManager.newFileTransfer(id,
+        password: password,
+        isSharedPassword: isSharedPassword,
+        connToken: connToken,
+        forceRelay: forceRelay);
+  } else if (isViewCamera) {
     await rustDeskWinManager.newViewCamera(id,
+        password: password,
+        isSharedPassword: isSharedPassword,
+        connToken: connToken,
+        forceRelay: forceRelay);
+  } else if (isTcpTunneling || isRDP) {
+    await rustDeskWinManager.newPortForward(id, isRDP,
         password: password,
         isSharedPassword: isSharedPassword,
         connToken: connToken,
@@ -2505,17 +2565,21 @@ connectMainDesktop(String id,
 }
 
 /// Connect to a peer with [id].
+/// If [isFileTransfer], starts a session only for file transfer.
 /// If [isViewCamera], starts a session only for view camera.
+/// If [isTcpTunneling], starts a session only for tcp tunneling.
+/// If [isRDP], starts a session only for rdp.
 connect(BuildContext context, String id,
-    {bool isViewCamera = false,
+    {bool isFileTransfer = false,
+    bool isViewCamera = false,
     bool isTerminal = false,
+    bool isTcpTunneling = false,
+    bool isRDP = false,
     bool forceRelay = false,
     String? password,
     String? connToken,
     bool? isSharedPassword}) async {
   if (id == '') return;
-  // 登录令牌只从内存取用, 调用方未显式传入时兜底
-  connToken ??= OmAuth.instance.accessToken;
   if (!isDesktop || desktopType == DesktopType.main) {
     try {
       if (Get.isRegistered<IDTextEditingController>()) {
@@ -2532,29 +2596,30 @@ connect(BuildContext context, String id,
   final oldId = id;
   id = await bind.mainHandleRelayId(id: id);
   forceRelay = id != oldId || forceRelay;
+  assert(!(isFileTransfer && isTcpTunneling && isRDP),
+      "more than one connect type");
 
   if (isDesktop) {
-    // 连接引擎替换: 会话窗 = SessionHost 外部进程,stdin 注入 START <json>。
-    final kind = isTerminal ? 'terminal' : 'remote';
-    final started =
-        await launchSessionHost(id, kind: kind, name: id, token: connToken);
-    if (started) return;
-    // 未找到 SessionHost 时退回原多窗会话路径,保持外壳可用。
     if (desktopType == DesktopType.main) {
       await connectMainDesktop(
         id,
+        isFileTransfer: isFileTransfer,
         isViewCamera: isViewCamera,
         isTerminal: isTerminal,
+        isTcpTunneling: isTcpTunneling,
+        isRDP: isRDP,
         password: password,
         isSharedPassword: isSharedPassword,
-        connToken: connToken,
         forceRelay: forceRelay,
       );
     } else {
       await rustDeskWinManager.call(WindowType.Main, kWindowConnect, {
         'id': id,
+        'isFileTransfer': isFileTransfer,
         'isViewCamera': isViewCamera,
         'isTerminal': isTerminal,
+        'isTcpTunneling': isTcpTunneling,
+        'isRDP': isRDP,
         'password': password,
         'isSharedPassword': isSharedPassword,
         'forceRelay': forceRelay,
@@ -2562,7 +2627,31 @@ connect(BuildContext context, String id,
       });
     }
   } else {
-    if (isViewCamera) {
+    if (isFileTransfer) {
+      if (isWeb) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (BuildContext context) =>
+                desktop_file_manager.FileManagerPage(
+                    id: id,
+                    password: password,
+                    isSharedPassword: isSharedPassword),
+          ),
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (BuildContext context) => FileManagerPage(
+                id: id,
+                password: password,
+                isSharedPassword: isSharedPassword,
+                forceRelay: forceRelay),
+          ),
+        );
+      }
+    } else if (isViewCamera) {
       if (isWeb) {
         Navigator.push(
           context,
@@ -2878,7 +2967,7 @@ class ServerConfig {
 
   /// from local options
   ServerConfig.fromOptions(Map<String, dynamic> options)
-      : idServer = '',
+      : idServer = options['custom-rendezvous-server'] ?? "",
         relayServer = options['relay-server'] ?? "",
         apiServer = options['api-server'] ?? "",
         key = options['key'] ?? "";
@@ -2936,8 +3025,12 @@ String getWindowName({WindowType? overrideType}) {
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
+    case WindowType.FileTransfer:
+      return "File Transfer - $name";
     case WindowType.ViewCamera:
       return "View Camera - $name";
+    case WindowType.PortForward:
+      return "Port Forward - $name";
     case WindowType.RemoteDesktop:
       return "Remote Desktop - $name";
     default:
@@ -2968,6 +3061,28 @@ Future<void> updateSystemWindowTheme() async {
 /// Note: not found a general solution for rust based AVFoundation bingding.
 /// [AVFoundation] crate has compile error.
 const kMacOSPermChannel = MethodChannel("org.rustdesk.rustdesk/host");
+
+enum PermissionAuthorizeType {
+  undetermined,
+  authorized,
+  denied, // and restricted
+}
+
+Future<PermissionAuthorizeType> osxCanRecordAudio() async {
+  int res = await kMacOSPermChannel.invokeMethod("canRecordAudio");
+  print(res);
+  if (res > 0) {
+    return PermissionAuthorizeType.authorized;
+  } else if (res == 0) {
+    return PermissionAuthorizeType.undetermined;
+  } else {
+    return PermissionAuthorizeType.denied;
+  }
+}
+
+Future<bool> osxRequestAudio() async {
+  return await kMacOSPermChannel.invokeMethod("requestRecordAudio");
+}
 
 Widget futureBuilder(
     {required Future? future, required Widget Function(dynamic data) hasData}) {
@@ -3513,10 +3628,17 @@ Future<bool> setServerConfig(
   final oldApiServer = await bind.mainGetApiServer();
 
   // should set one by one
+  await bind.mainSetOption(
+      key: 'custom-rendezvous-server', value: config.idServer);
   await bind.mainSetOption(key: 'relay-server', value: config.relayServer);
   await bind.mainSetOption(key: 'api-server', value: config.apiServer);
   await bind.mainSetOption(key: 'key', value: config.key);
   final newApiServer = await bind.mainGetApiServer();
+  if (oldApiServer.isNotEmpty &&
+      oldApiServer != newApiServer &&
+      gFFI.userModel.isLogin) {
+    gFFI.userModel.logOut(apiServer: oldApiServer);
+  }
   return true;
 }
 
@@ -3727,6 +3849,61 @@ bool isInHomePage() {
   return controller.state.value.selected == 0;
 }
 
+Widget _buildPresetPasswordWarning() {
+  if (bind.mainGetBuildinOption(key: kOptionRemovePresetPasswordWarning) !=
+      'N') {
+    return SizedBox.shrink();
+  }
+  return Container(
+    color: Colors.yellow,
+    child: Column(
+      children: [
+        Align(
+            child: Text(
+          translate("Security Alert"),
+          style: TextStyle(
+            color: Colors.red,
+            fontSize:
+                18, // https://github.com/rustdesk/rustdesk-server-pro/issues/261
+            fontWeight: FontWeight.bold,
+          ),
+        )).paddingOnly(bottom: 8),
+        Text(
+          translate("preset_password_warning"),
+          style: TextStyle(color: Colors.red),
+        )
+      ],
+    ).paddingAll(8),
+  ); // Show a warning message if the Future completed with true
+}
+
+Widget buildPresetPasswordWarningMobile() {
+  if (bind.isPresetPasswordMobileOnly()) {
+    return _buildPresetPasswordWarning();
+  } else {
+    return SizedBox.shrink();
+  }
+}
+
+Widget buildPresetPasswordWarning() {
+  return FutureBuilder<bool>(
+    future: bind.isPresetPassword(),
+    builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return CircularProgressIndicator(); // Show a loading spinner while waiting for the Future to complete
+      } else if (snapshot.hasError) {
+        return Text(
+            'Error: ${snapshot.error}'); // Show an error message if the Future completed with an error
+      } else if (snapshot.hasData && snapshot.data == true) {
+        return _buildPresetPasswordWarning();
+      } else {
+        return SizedBox
+            .shrink(); // Show nothing if the Future completed with false or null
+      }
+    },
+  );
+}
+
 // https://github.com/leanflutter/window_manager/blob/87dd7a50b4cb47a375b9fc697f05e56eea0a2ab3/lib/src/widgets/virtual_window_frame.dart#L44
 Widget buildVirtualWindowFrame(BuildContext context, Widget child) {
   boxShadow() => isMainDesktopWindow
@@ -3791,6 +3968,10 @@ setResizable(bool resizable) {
 
 isOptionFixed(String key) => bind.mainIsOptionFixed(key: key);
 
+bool isChangePermanentPasswordDisabled() =>
+    bind.mainGetBuildinOption(key: kOptionDisableChangePermanentPassword) ==
+    'Y';
+
 bool isChangeIdDisabled() =>
     bind.mainGetBuildinOption(key: kOptionDisableChangeId) == 'Y';
 
@@ -3846,6 +4027,24 @@ disableWindowMovable(int? windowId) {
   }
 }
 
+Widget netWorkErrorWidget() {
+  return Center(
+      child: Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      if (!gFFI.userModel.networkErrorFromServer.value)
+        Text(translate("network_error_tip")),
+      ElevatedButton(
+              onPressed: gFFI.userModel.refreshCurrentUser,
+              child: Text(translate("Retry")))
+          .marginSymmetric(vertical: 16),
+      SelectableText(gFFI.userModel.networkError.value,
+          style: TextStyle(fontSize: 11, color: Colors.red)),
+    ],
+  ));
+}
+
 List<ResizeEdge>? get windowManagerEnableResizeEdges => isWindows
     ? [
         ResizeEdge.topLeft,
@@ -3864,6 +4063,23 @@ List<SubWindowResizeEdge>? get subWindowManagerEnableResizeEdges => isWindows
 
 void earlyAssert() {
   assert('\1' == '1');
+}
+
+void checkUpdate() {
+  if (!isWeb) {
+    if (!bind.isCustomClient()) {
+      platformFFI.registerEventHandler(
+          kCheckSoftwareUpdateFinish, kCheckSoftwareUpdateFinish,
+          (Map<String, dynamic> evt) async {
+        if (evt['url'] is String) {
+          stateGlobal.updateUrl.value = evt['url'];
+        }
+      });
+      Timer(const Duration(seconds: 1), () async {
+        bind.mainGetSoftwareUpdateUrl();
+      });
+    }
+  }
 }
 
 // https://github.com/flutter/flutter/issues/153560#issuecomment-2497160535

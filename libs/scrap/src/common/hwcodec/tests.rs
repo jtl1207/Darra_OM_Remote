@@ -5,7 +5,7 @@ use crate::{
     AdapterDevice, CodecFormat,
 };
 use base::config::keys::{OPTION_ALLOW_D3D_RENDER, OPTION_ENABLE_HWCODEC};
-use base::config::{OVERWRITE_LOCAL_SETTINGS, OVERWRITE_SETTINGS};
+use hbb_common::config::{OVERWRITE_LOCAL_SETTINGS, OVERWRITE_SETTINGS};
 use hwcodec::{
     common::{DataFormat, Driver},
     vram::{DecodeContext, FeatureContext},

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
+import 'package:flutter_hbb/mobile/pages/home_page.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:get/get.dart';
@@ -62,9 +63,11 @@ class ChatModel with ChangeNotifier {
 
   RxBool isWindowFocus = true.obs;
   BlockableOverlayState _blockableOverlayState = BlockableOverlayState();
+  final Rx<VoiceCallStatus> _voiceCallStatus = Rx(VoiceCallStatus.notStarted);
   final RxBool _softKeyboardRequested = false.obs;
   bool _usingPhysicalChatInput = false;
 
+  Rx<VoiceCallStatus> get voiceCallStatus => _voiceCallStatus;
   RxBool get softKeyboardRequested => _softKeyboardRequested;
 
   TextEditingController textController = TextEditingController();
@@ -212,6 +215,7 @@ class ChatModel with ChangeNotifier {
         !gFFI.chatModel.currentKey.isOut && // not in remote page
         gFFI.chatModel.latestReceivedKey != null) {
       gFFI.chatModel.changeCurrentKey(gFFI.chatModel.latestReceivedKey!);
+      gFFI.chatModel.mobileClearClientUnread(gFFI.chatModel.currentKey.connId);
     }
     final overlay = OverlayEntry(builder: (context) {
       return Listener(
@@ -316,6 +320,13 @@ class ChatModel with ChangeNotifier {
       await windowManager.setSizeAlignment(
           kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
     } else {
+      final currentSelectedTab =
+          gFFI.serverModel.tabController.state.value.selectedTabInfo;
+      final client = parent.target?.serverModel.clients.firstWhereOrNull(
+          (client) => client.id.toString() == currentSelectedTab.key);
+      if (client != null) {
+        client.unreadChatMessageCount.value = 0;
+      }
       requestChatInputFocus();
       await windowManager.show();
       await windowManager.setSizeAlignment(
@@ -331,6 +342,10 @@ class ChatModel with ChangeNotifier {
     String? peerName;
     if (key.connId == clientModeID) {
       peerName = parent.target?.ffiModel.pi.username;
+    } else {
+      peerName = parent.target?.serverModel.clients
+          .firstWhereOrNull((client) => client.peerId == key.peerId)
+          ?.name;
     }
     if (!_messages.containsKey(key)) {
       final chatUser = ChatUser(
@@ -345,6 +360,7 @@ class ChatModel with ChangeNotifier {
     }
     _currentKey = key;
     notifyListeners();
+    mobileClearClientUnread(key.connId);
   }
 
   receive(int id, String text) async {
@@ -360,6 +376,10 @@ class ChatModel with ChangeNotifier {
     String? peerId;
     if (id == clientModeID) {
       peerId = session.id;
+    } else {
+      peerId = session.serverModel.clients
+          .firstWhereOrNull((e) => e.id == id)
+          ?.peerId;
     }
     if (peerId == null) {
       debugPrint("Failed to receive msg, peerId is null");
@@ -403,12 +423,38 @@ class ChatModel with ChangeNotifier {
           }
         }
       }
+    } else {
+      final client = session.serverModel.clients
+          .firstWhereOrNull((client) => client.id == id);
+      if (client == null) {
+        debugPrint("Failed to receive msg, client is null");
+        return;
+      }
+      if (isDesktop) {
+        windowOnTop(null);
+        // disable auto jumpTo other tab when hasFocus, and mark unread message
+        final currentSelectedTab =
+            session.serverModel.tabController.state.value.selectedTabInfo;
+        if (currentSelectedTab.key != id.toString() && inputNode.hasFocus) {
+          client.unreadChatMessageCount.value += 1;
+        } else {
+          parent.target?.serverModel.jumpTo(id);
+        }
+      } else {
+        if (HomePage.homeKey.currentState?.isChatPageCurrentTab != true ||
+            _currentKey != messagekey) {
+          client.unreadChatMessageCount.value += 1;
+          mobileUpdateUnreadSum();
+        }
+      }
+      chatUser = ChatUser(id: client.peerId, firstName: client.name);
     }
     insertMessage(messagekey,
         ChatMessage(text: text, user: chatUser, createdAt: DateTime.now()));
     if (id == clientModeID || _currentKey.peerId.isEmpty) {
       // client or invalid
       _currentKey = messagekey;
+      mobileClearClientUnread(messagekey.connId);
     }
     latestReceivedKey = messagekey;
     notifyListeners();
@@ -451,6 +497,29 @@ class ChatModel with ChangeNotifier {
     }
     if (_currentKey == key || _currentKey.peerId.isEmpty) {
       _currentKey = key; // hash != assign
+    }
+  }
+
+  void mobileUpdateUnreadSum() {
+    if (!isMobile) return;
+    var sum = 0;
+    parent.target?.serverModel.clients
+        .map((e) => sum += e.unreadChatMessageCount.value)
+        .toList();
+    Future.delayed(Duration.zero, () {
+      mobileUnreadSum.value = sum;
+    });
+  }
+
+  void mobileClearClientUnread(int id) {
+    if (!isMobile) return;
+    final client = parent.target?.serverModel.clients
+        .firstWhereOrNull((client) => client.id == id);
+    if (client != null) {
+      Future.delayed(Duration.zero, () {
+        client.unreadChatMessageCount.value = 0;
+        mobileUpdateUnreadSum();
+      });
     }
   }
 
@@ -512,4 +581,42 @@ class ChatModel with ChangeNotifier {
     _usingPhysicalChatInput = false;
     TextInput.restorePlatformInputControl();
   }
+
+  void onVoiceCallWaiting() {
+    _voiceCallStatus.value = VoiceCallStatus.waitingForResponse;
+  }
+
+  void onVoiceCallStarted() {
+    _voiceCallStatus.value = VoiceCallStatus.connected;
+    if (isAndroid) {
+      parent.target?.invokeMethod("on_voice_call_started");
+    }
+  }
+
+  void onVoiceCallClosed(String reason) {
+    _voiceCallStatus.value = VoiceCallStatus.notStarted;
+    if (isAndroid) {
+      // We can always invoke "on_voice_call_closed"
+      // no matter if the `_voiceCallStatus` was `VoiceCallStatus.notStarted` or not.
+      parent.target?.invokeMethod("on_voice_call_closed");
+    }
+  }
+
+  void onVoiceCallIncoming() {
+    if (isConnManager) {
+      _voiceCallStatus.value = VoiceCallStatus.incoming;
+    }
+  }
+
+  void closeVoiceCall() {
+    bind.sessionCloseVoiceCall(sessionId: sessionId);
+  }
+}
+
+enum VoiceCallStatus {
+  notStarted,
+  waitingForResponse,
+  connected,
+  // Connection manager only.
+  incoming
 }

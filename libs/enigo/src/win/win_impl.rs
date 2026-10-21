@@ -147,7 +147,7 @@ impl MouseControllable for Enigo {
         };
         let (Some(dx), Some(dy)) = (to_absolute(x, left, width), to_absolute(y, top, height))
         else {
-            throttled_log!(
+            hbb_common::throttled_log!(
                 std::time::Duration::from_secs(60),
                 warn,
                 "mouse_move_to skipped: virtual screen size unavailable"

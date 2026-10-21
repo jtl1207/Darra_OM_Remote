@@ -1,7 +1,13 @@
-use crate::lang::translate;
-use base::{allow_err, log};
+use crate::client::translate;
+#[cfg(windows)]
+use crate::ipc::Data;
+#[cfg(windows)]
+use hbb_common::tokio;
+use hbb_common::{allow_err, log};
 use base::config::keys;
 use std::sync::{Arc, Mutex};
+#[cfg(windows)]
+use std::time::Duration;
 
 pub fn start_tray() {
     if crate::ui_interface::get_builtin_option(keys::OPTION_HIDE_TRAY) == "Y" {
@@ -11,12 +17,15 @@ pub fn start_tray() {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    crate::server::check_zombie();
+
     allow_err!(make_tray());
 }
 
-fn make_tray() -> base::ResultType<()> {
+fn make_tray() -> hbb_common::ResultType<()> {
     // https://github.com/tauri-apps/tray-icon/blob/dev/examples/tao.rs
-    use base::anyhow::Context;
+    use hbb_common::anyhow::Context;
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
     use tray_icon::{
         menu::{Menu, MenuEvent, MenuItem},
@@ -71,16 +80,28 @@ fn make_tray() -> base::ResultType<()> {
     } else {
         tray_menu.append_items(&[&open_i]).ok();
     }
-    // 托盘提示只报服务运行状态（被控端会话计数已随旧引擎删除）
-    let tooltip = format!(
-        "{} {}",
-        crate::get_app_name(),
-        translate("Service is running".to_owned()),
-    );
+    let tooltip = |count: usize| {
+        if count == 0 {
+            format!(
+                "{} {}",
+                crate::get_app_name(),
+                translate("Service is running".to_owned()),
+            )
+        } else {
+            format!(
+                "{} - {}\n{}",
+                crate::get_app_name(),
+                translate("Ready".to_owned()),
+                translate("{".to_string() + &format!("{count}") + "} sessions"),
+            )
+        }
+    };
     let mut _tray_icon: Arc<Mutex<Option<TrayIcon>>> = Default::default();
 
     let menu_channel = MenuEvent::receiver();
     let tray_channel = TrayEvent::receiver();
+    #[cfg(windows)]
+    let (ipc_sender, ipc_receiver) = std::sync::mpsc::channel::<Data>();
 
     let open_func = move || {
         if cfg!(not(feature = "flutter")) {
@@ -99,11 +120,19 @@ fn make_tray() -> base::ResultType<()> {
         }
         #[cfg(target_os = "linux")]
         {
-            // 进程间唤醒通道已删，直接拉起新实例
-            crate::run_me::<&str>(vec![]).ok();
+            // Do not use "xdg-open", it won't read the config.
+            if crate::dbus::invoke_new_connection(crate::get_uri_prefix()).is_err() {
+                if let Ok(task) = crate::run_me::<&str>(vec![]) {
+                    crate::server::CHILD_PROCESS.lock().unwrap().push(task);
+                }
+            }
         }
     };
 
+    #[cfg(windows)]
+    std::thread::spawn(move || {
+        start_query_session_count(ipc_sender.clone());
+    });
     #[cfg(windows)]
     let mut last_click = std::time::Instant::now();
     #[cfg(target_os = "macos")]
@@ -127,7 +156,7 @@ fn make_tray() -> base::ResultType<()> {
             let mut builder = TrayIconBuilder::new()
                 .with_id(crate::get_app_name().to_lowercase())
                 .with_menu(Box::new(tray_menu.clone()))
-                .with_tooltip(tooltip.clone())
+                .with_tooltip(tooltip(0))
                 .with_icon(icon.clone());
             #[cfg(target_os = "macos")]
             {
@@ -217,7 +246,56 @@ fn make_tray() -> base::ResultType<()> {
             }
         }
 
+        #[cfg(windows)]
+        if let Ok(data) = ipc_receiver.try_recv() {
+            match data {
+                Data::ControlledSessionCount(count) => {
+                    _tray_icon
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .map(|t| t.set_tooltip(Some(tooltip(count))));
+                }
+                _ => {}
+            }
+        }
     });
+}
+
+#[cfg(windows)]
+#[tokio::main(flavor = "current_thread")]
+async fn start_query_session_count(sender: std::sync::mpsc::Sender<Data>) {
+    let mut last_count = 0;
+    loop {
+        if let Ok(mut c) = crate::ipc::connect(1000, "").await {
+            let mut timer = crate::rustdesk_interval(tokio::time::interval(Duration::from_secs(1)));
+            loop {
+                tokio::select! {
+                    res = c.next() => {
+                        match res {
+                            Err(err) => {
+                                log::error!("ipc connection closed: {}", err);
+                                break;
+                            }
+
+                            Ok(Some(Data::ControlledSessionCount(count))) => {
+                                if count != last_count {
+                                    last_count = count;
+                                    sender.send(Data::ControlledSessionCount(count)).ok();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    _ = timer.tick() => {
+                        c.send(&Data::ControlledSessionCount(0)).await.ok();
+                    }
+                }
+            }
+        }
+        hbb_common::sleep(1.).await;
+    }
 }
 
 fn load_icon_from_asset() -> Option<image::DynamicImage> {

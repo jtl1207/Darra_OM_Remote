@@ -20,6 +20,7 @@ ShortcutPlatformCapabilities capabilities({
   bool includeResetCanvasShortcut = true,
   bool includePinToolbarShortcut = true,
   bool includeViewModeShortcut = true,
+  bool includeVoiceCallShortcut = true,
   Set<String> excludedActions = const {},
 }) {
   return ShortcutPlatformCapabilities(
@@ -34,6 +35,7 @@ ShortcutPlatformCapabilities capabilities({
     includeResetCanvasShortcut: includeResetCanvasShortcut,
     includePinToolbarShortcut: includePinToolbarShortcut,
     includeViewModeShortcut: includeViewModeShortcut,
+    includeVoiceCallShortcut: includeVoiceCallShortcut,
     excludedActions: excludedActions,
   );
 }
@@ -199,6 +201,7 @@ void main() {
         includeResetCanvasShortcut: false,
         includePinToolbarShortcut: false,
         includeViewModeShortcut: false,
+        includeVoiceCallShortcut: false,
       ),
     );
 
@@ -227,6 +230,7 @@ void main() {
         includeResetCanvasShortcut: true,
         includePinToolbarShortcut: false,
         includeViewModeShortcut: false,
+        includeVoiceCallShortcut: false,
       ),
     );
     final ids = idSet(groups);
@@ -299,6 +303,7 @@ void main() {
         includeResetCanvasShortcut: false,
         includePinToolbarShortcut: false,
         includeViewModeShortcut: false,
+        includeVoiceCallShortcut: false,
       ),
     );
     final titles = groups.map((g) => g.titleKey).toList();
@@ -429,6 +434,7 @@ void main() {
       kShortcutActionToggleShowMyCursor,
       kShortcutActionToggleZoomCursor,
       kShortcutActionToggleRecording,
+      kShortcutActionToggleVoiceCall,
       kShortcutActionResetCanvas,
       kShortcutActionToggleMute,
       kShortcutActionSendCtrlAltDel,
@@ -442,6 +448,7 @@ void main() {
     }));
     final cap = capabilities(
       includeRecordingShortcut: false,
+      includeVoiceCallShortcut: false,
       includeResetCanvasShortcut: false,
       excludedActions: {
         kShortcutActionSwitchDisplayAll,

@@ -1,5 +1,8 @@
 use docopt::Docopt;
-use env_logger::{init_from_env, Env, DEFAULT_FILTER_ENV};
+use hbb_common::{
+    env_logger::{init_from_env, Env, DEFAULT_FILTER_ENV},
+    log,
+};
 use scrap::{
     aom::{AomDecoder, AomEncoder, AomEncoderConfig},
     codec::{EncoderApi, EncoderCfg},

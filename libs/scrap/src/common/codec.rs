@@ -28,11 +28,15 @@ use base::message_proto::{
     feature = "vram",
     target_os = "windows"
 ))]
-use base::config::option2bool;
-use anyhow::{anyhow, bail, Result as ResultType};
-// Config/PeerConfig 仍挂在 base(共同件)。
-use base::config::{Config, PeerConfig};
-use sysinfo::System;
+use hbb_common::config::option2bool;
+use hbb_common::{
+    anyhow::anyhow,
+    bail,
+    config::{Config, PeerConfig},
+    lazy_static, log,
+    sysinfo::System,
+    ResultType,
+};
 
 lazy_static::lazy_static! {
     static ref PEER_DECODINGS: Arc<Mutex<HashMap<i32, SupportedDecoding>>> = Default::default();
@@ -883,7 +887,7 @@ pub fn enable_directx_capture() -> bool {
 #[cfg(windows)]
 pub fn allow_d3d_render() -> bool {
     use base::config::keys::OPTION_ALLOW_D3D_RENDER as OPTION;
-    option2bool(OPTION, &base::config::LocalConfig::get_option(OPTION))
+    option2bool(OPTION, &hbb_common::config::LocalConfig::get_option(OPTION))
 }
 
 pub const BR_BEST: f32 = 1.5;
@@ -1035,7 +1039,7 @@ fn disable_av1() -> bool {
 #[cfg(not(target_os = "ios"))]
 pub fn test_av1() {
     use base::config::keys::OPTION_AV1_TEST;
-    use rand::Rng;
+    use hbb_common::rand::Rng;
     use std::{sync::Once, time::Duration};
 
     if disable_av1() || !Config::get_option(OPTION_AV1_TEST).is_empty() {
@@ -1052,7 +1056,7 @@ pub fn test_av1() {
             let move_step = 50;
             let generate_fake_data =
                 |frame_index: u32, dst_fmt: EncodeYuvFormat| -> ResultType<Vec<u8>> {
-                    let mut rng = rand::thread_rng();
+                    let mut rng = hbb_common::rand::thread_rng();
                     let mut bgra = vec![0u8; (width * height * 4) as usize];
                     let gradient = frame_index as f32 / frame_count as f32;
                     // floating block

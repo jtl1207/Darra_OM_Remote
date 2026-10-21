@@ -1,4 +1,4 @@
-use base::regex::Regex;
+use hbb_common::regex::Regex;
 use std::ops::Deref;
 
 mod ar;
@@ -183,7 +183,7 @@ pub fn translate(name: String) -> String {
 
 pub fn translate_locale(name: String, locale: &str) -> String {
     let lang = resolve_lang(
-        &base::config::LocalConfig::get_option("lang"),
+        &hbb_common::config::LocalConfig::get_option("lang"),
         locale,
         cjk_ui_unavailable(),
     );
@@ -251,7 +251,10 @@ pub fn translate_locale(name: String, locale: &str) -> String {
             s = s.replace("{}", &value);
         }
         if !crate::is_rustdesk() {
-            if s.contains("RustDesk") && name != "powered_by_me" {
+            if s.contains("RustDesk")
+                && !name.starts_with("upgrade_rustdesk_server_pro")
+                && name != "powered_by_me"
+            {
                 let app_name = crate::get_app_name();
                 if !app_name.contains("RustDesk") {
                     s = s.replace("RustDesk", &app_name);

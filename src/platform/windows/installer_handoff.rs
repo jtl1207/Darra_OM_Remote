@@ -9,7 +9,7 @@ use super::{
     },
     validate_install_app_name, ResultType,
 };
-use base::{
+use hbb_common::{
     anyhow::anyhow,
     bail, log,
     sha2::{Digest, Sha256},

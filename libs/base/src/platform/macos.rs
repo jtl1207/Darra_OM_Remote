@@ -1,4 +1,4 @@
-use anyhow::Result as ResultType;
+use hbb_common::ResultType;
 use osascript;
 use serde_derive::{Deserialize, Serialize};
 

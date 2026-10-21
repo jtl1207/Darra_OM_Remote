@@ -10,7 +10,7 @@ use jni::{
 };
 
 use base::message_proto::MultiClipboards;
-use protobuf::Message;
+use hbb_common::protobuf::Message;
 use jni::errors::{Error as JniError, Result as JniResult};
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -465,13 +465,13 @@ fn init_ndk_context(java_vm: *mut c_void, context_jobject: *mut c_void) {
 }
 
 fn try_init_rustls_platform_verifier(env: &mut JNIEnv, context_jobject: *mut c_void) {
-    use base::config::ANDROID_RUSTLS_PLATFORM_VERIFIER_INITIALIZED as INITIALIZED;
+    use hbb_common::config::ANDROID_RUSTLS_PLATFORM_VERIFIER_INITIALIZED as INITIALIZED;
     use std::sync::atomic::Ordering;
     let initialized = INITIALIZED.load(Ordering::Relaxed);
     if !initialized {
         let ctx_for_rustls = unsafe { JObject::from_raw(context_jobject as jni::sys::jobject) };
         if let Err(e) =
-            base::rustls_platform_verifier::android::init_hosted(env, ctx_for_rustls)
+            hbb_common::rustls_platform_verifier::android::init_hosted(env, ctx_for_rustls)
         {
             log::error!("Failed to initialize rustls-platform-verifier: {:?}", e);
         } else {

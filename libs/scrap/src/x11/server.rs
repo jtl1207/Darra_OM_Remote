@@ -1,4 +1,4 @@
-use libc;
+use hbb_common::libc;
 use std::ptr;
 use std::rc::Rc;
 

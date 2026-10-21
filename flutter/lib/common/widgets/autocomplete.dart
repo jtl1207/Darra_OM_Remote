@@ -11,6 +11,7 @@ import 'package:flutter_hbb/common/widgets/peer_card.dart';
 @visibleForTesting
 List<Peer> mergeAutocompletePeers({
   Iterable<Peer> addressBookPeers = const [],
+  Iterable<Peer> groupPeers = const [],
   Iterable<Peer> lanPeers = const [],
   Iterable<Peer> recentPeers = const [],
   Iterable<String> restRecentPeerIds = const [],
@@ -30,6 +31,9 @@ List<Peer> mergeAutocompletePeers({
   }
 
   for (final peer in addressBookPeers) {
+    addPeer(peer);
+  }
+  for (final peer in groupPeers) {
     addPeer(peer);
   }
   for (final peer in lanPeers) {
@@ -129,6 +133,7 @@ class AllPeersLoader {
     gFFI.recentPeersModel.addListener(_mergeAllPeers);
     gFFI.lanPeersModel.addListener(_mergeAllPeers);
     gFFI.abModel.addPeerUpdateListener(_listenerKey, _mergeAllPeers);
+    gFFI.groupModel.addPeerUpdateListener(_listenerKey, _mergeAllPeers);
     platformFFI.registerEventHandler(_cbQueryOnlines, _listenerKey,
         (evt) async {
       _updateOnlineState(evt);
@@ -139,6 +144,7 @@ class AllPeersLoader {
     gFFI.recentPeersModel.removeListener(_mergeAllPeers);
     gFFI.lanPeersModel.removeListener(_mergeAllPeers);
     gFFI.abModel.removePeerUpdateListener(_listenerKey);
+    gFFI.groupModel.removePeerUpdateListener(_listenerKey);
     platformFFI.unregisterEventHandler(_cbQueryOnlines, _listenerKey);
     _queryOnlineTimer?.cancel();
     _lastQueryOnlineOptions = const [];
@@ -158,7 +164,7 @@ class AllPeersLoader {
     if (gFFI.lanPeersModel.peers.isEmpty) {
       bind.mainLoadLanPeers();
     }
-    // No need to care about peers from abModel.
+    // No need to care about peers from abModel, and group model.
     // Because they will pull data in `refreshCurrentUser()` on startup.
 
     final startTime = DateTime.now();
@@ -175,6 +181,7 @@ class AllPeersLoader {
     }
     peers = mergeAutocompletePeers(
       addressBookPeers: gFFI.abModel.allPeers(),
+      groupPeers: gFFI.groupModel.peers,
       lanPeers: gFFI.lanPeersModel.peers,
       recentPeers: gFFI.recentPeersModel.peers,
       restRecentPeerIds: gFFI.recentPeersModel.restPeerIds,

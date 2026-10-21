@@ -1,5 +1,5 @@
 use super::{wide_string, ResultType};
-use base::{
+use hbb_common::{
     anyhow::anyhow,
     bail,
     base64::{engine::general_purpose::STANDARD, Engine as _},

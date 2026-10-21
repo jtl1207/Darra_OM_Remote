@@ -13,16 +13,6 @@ const double kDesktopRemoteTabBarHeight = 28.0;
 const int kInvalidWindowId = -1;
 const int kMainWindowId = 0;
 
-/// 连接产物常量单点(与 src/client/io_loop.rs 同步维护)。
-/// SessionHost 查找顺序: ① 本应用 exe 同目录 ② C:\DARRA\OM_CONSOLE\。
-const String kSessionHostExeName = 'Darra远程会话.exe';
-const List<String> kSessionHostSearchDirs = ['', r'C:\DARRA\OM_CONSOLE\'];
-const String kSessionHostStartPrefix = 'START ';
-
-/// 会话管理窗尺寸(聊天开/合)。
-const Size kConnectionManagerWindowSizeClosedChat = Size(300, 490);
-const Size kConnectionManagerWindowSizeOpenChat = Size(700, 490);
-
 const kAllDisplayValue = -1;
 
 const kKeyLegacyMode = 'legacy';
@@ -37,6 +27,12 @@ const String kPlatformAdditionsRustDeskVirtualDisplays =
 const String kPlatformAdditionsAmyuniVirtualDisplays =
     "amyuni_virtual_displays";
 const String kPlatformAdditionsHasFileClipboard = "has_file_clipboard";
+const String kPlatformAdditionsSupportedPrivacyModeImpl =
+    "supported_privacy_mode_impl";
+
+const String kPrivacyModeImplMag = 'privacy_mode_impl_mag';
+const String kPrivacyModeImplExcludeFromCapture =
+    'privacy_mode_impl_exclude_from_capture';
 
 const String kPeerPlatformWindows = "Windows";
 const String kPeerPlatformLinux = "Linux";
@@ -46,11 +42,16 @@ const String kPeerPlatformWebDesktop = "WebDesktop";
 
 const double kScrollbarThickness = 12.0;
 
-/// [kAppTypeMain] used by 'Desktop Main Page' and 'Mobile Client'
+/// [kAppTypeMain] used by 'Desktop Main Page' , 'Mobile (Client and Server)', "Install Page"
 const String kAppTypeMain = "main";
 
+/// [kAppTypeConnectionManager] only for 'Desktop CM Page'
+const String kAppTypeConnectionManager = "cm";
+
 const String kAppTypeDesktopRemote = "remote";
+const String kAppTypeDesktopFileTransfer = "file transfer";
 const String kAppTypeDesktopViewCamera = "view camera";
+const String kAppTypeDesktopPortForward = "port forward";
 const String kAppTypeDesktopTerminal = "terminal";
 
 const String kWindowMainWindowOnTop = "main_window_on_top";
@@ -65,7 +66,9 @@ const String kWindowConnect = "connect";
 const String kWindowBumpMouse = "bump_mouse";
 
 const String kWindowEventNewRemoteDesktop = "new_remote_desktop";
+const String kWindowEventNewFileTransfer = "new_file_transfer";
 const String kWindowEventNewViewCamera = "new_view_camera";
+const String kWindowEventNewPortForward = "new_port_forward";
 const String kWindowEventNewTerminal = "new_terminal";
 const String kWindowEventRestoreTerminalSessions = "restore_terminal_sessions";
 const String kWindowEventActiveSession = "active_session";
@@ -109,6 +112,7 @@ const String kOptionEnableKeyboard = "enable-keyboard";
 // "Settings -> Security -> Permissions"
 const String kOptionEnableRemotePrinter = "enable-remote-printer";
 const String kOptionEnableClipboard = "enable-clipboard";
+const String kOptionEnableFileTransfer = "enable-file-transfer";
 const String kOptionEnableAudio = "enable-audio";
 const String kOptionEnableCamera = "enable-camera";
 const String kOptionEnableTerminal = "enable-terminal";
@@ -121,6 +125,7 @@ const String kTerminalClipboardWriteDenied = "N";
 const String kOptionEnableTunnel = "enable-tunnel";
 const String kOptionEnableRemoteRestart = "enable-remote-restart";
 const String kOptionEnableBlockInput = "enable-block-input";
+const String kOptionEnablePrivacyMode = "enable-privacy-mode";
 const String kOptionEnablePermChangeInAcceptWindow =
     "enable-perm-change-in-accept-window";
 const String kOptionHideElevateButtonInAcceptWindow =
@@ -138,6 +143,12 @@ const String kOptionFollowRemoteCursor = "follow_remote_cursor";
 const String kOptionFollowRemoteWindow = "follow_remote_window";
 const String kOptionZoomCursor = "zoom-cursor";
 const String kOptionShowQualityMonitor = "show_quality_monitor";
+const String kOptionDisableAudio = "disable_audio";
+const String kOptionEnableFileCopyPaste = "enable-file-copy-paste";
+// "Settings -> Display -> Other default options"
+const String kOptionDisableClipboard = "disable_clipboard";
+const String kOptionLockAfterSessionEnd = "lock_after_session_end";
+const String kOptionPrivacyMode = "privacy_mode";
 const String kOptionTouchMode = "touch-mode";
 const String kOptionI444 = "i444";
 const String kOptionSwapLeftRightMouse = "swap-left-right-mouse";
@@ -157,7 +168,10 @@ const String kOptionPeerTabVisible = "peer-tab-visible";
 const String kOptionPeerCardUiType = "peer-card-ui-type";
 const String kOptionCurrentAbName = "current-ab-name";
 const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
+const String kOptionEnablePortForwardMux = "enable-port-forward-mux";
 const String kOptionAllowAlwaysSoftwareRender = "allow-always-software-render";
+const String kOptionEnableCheckUpdate = "enable-check-update";
+const String kOptionAllowAutoUpdate = "allow-auto-update";
 const String kOptionAllowRemoveWallpaper = "allow-remove-wallpaper";
 const String kOptionStopService = "stop-service";
 const String kOptionDirectxCapture = "enable-directx-capture";
@@ -194,6 +208,10 @@ const String kOptionHideRemotePrinterSetting = "hide-remote-printer-settings";
 const String kOptionHideGeneralSetting = "hide-general-settings";
 const String kOptionHideSecuritySetting = "hide-security-settings";
 const String kOptionHideNetworkSetting = "hide-network-settings";
+const String kOptionRemovePresetPasswordWarning =
+    "remove-preset-password-warning";
+const String kOptionDisableChangePermanentPassword =
+    "disable-change-permanent-password";
 const String kOptionDisableChangeId = "disable-change-id";
 const String kOptionDisableUnlockPin = "disable-unlock-pin";
 const kHideUsernameOnCard = "hide-username-on-card";
@@ -257,6 +275,9 @@ const int kDesktopDefaultDisplayHeight = 720;
 
 const int kMobileMaxDisplaySize = 1280;
 const int kDesktopMaxDisplaySize = 3840;
+
+const double kDesktopFileTransferRowHeight = 30.0;
+const double kDesktopFileTransferHeaderHeight = 25.0;
 
 const double kMinFps = 5;
 const double kDefaultFps = 30;
@@ -330,6 +351,8 @@ extension StringExtension on String {
   String get nonBreaking => replaceAll(' ', String.fromCharCode($nbsp));
 }
 
+const Size kConnectionManagerWindowSizeClosedChat = Size(300, 490);
+const Size kConnectionManagerWindowSizeOpenChat = Size(700, 490);
 // Tabbar transition duration, now we remove the duration
 const Duration kTabTransitionDuration = Duration.zero;
 const double kEmptyMarginTop = 50;
@@ -696,3 +719,5 @@ enum WindowsTarget {
 extension WindowsTargetExt on int {
   WindowsTarget get windowsVersion => getWindowsTarget(this);
 }
+
+const kCheckSoftwareUpdateFinish = 'check_software_update_finish';

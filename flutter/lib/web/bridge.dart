@@ -139,7 +139,9 @@ class RustdeskImpl {
   String sessionAddSync(
       {required UuidValue sessionId,
       required String id,
+      required bool isFileTransfer,
       required bool isViewCamera,
+      required bool isPortForward,
       required bool isRdp,
       required bool isTerminal,
       required String switchUuid,
@@ -154,6 +156,7 @@ class RustdeskImpl {
         'id': id,
         'password': password,
         'is_shared_password': isSharedPassword,
+        'isFileTransfer': isFileTransfer,
         'isViewCamera': isViewCamera,
         'isTerminal': isTerminal
       })
@@ -218,6 +221,17 @@ class RustdeskImpl {
         ]));
   }
 
+  Future<void> sessionSend2Fa(
+      {required UuidValue sessionId,
+      required String code,
+      required bool trustThisDevice,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'send_2fa',
+          jsonEncode({'code': code, 'trust_this_device': trustThisDevice})
+        ]));
+  }
+
   Future<void> sessionClose({required UuidValue sessionId, dynamic hint}) {
     return Future(() => js.context.callMethod('setByName', ['session_close']));
   }
@@ -245,6 +259,17 @@ class RustdeskImpl {
       {required UuidValue sessionId, required String value, dynamic hint}) {
     return Future(
         () => js.context.callMethod('setByName', ['option:toggle', value]));
+  }
+
+  Future<void> sessionTogglePrivacyMode(
+      {required UuidValue sessionId,
+      required String implKey,
+      required bool on,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'toggle_privacy_mode',
+          jsonEncode({'impl_key': implKey, 'on': on})
+        ]));
   }
 
   Future<String?> sessionGetFlutterOption(
@@ -547,6 +572,135 @@ class RustdeskImpl {
         () => js.context.callMethod('setByName', ['input_os_password', value]));
   }
 
+  Future<void> sessionReadRemoteDir(
+      {required UuidValue sessionId,
+      required String path,
+      required bool includeHidden,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'read_remote_dir',
+          jsonEncode({'path': path, 'include_hidden': includeHidden})
+        ]));
+  }
+
+  Future<void> sessionSendFiles(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required String to,
+      required int fileNum,
+      required bool includeHidden,
+      required bool isRemote,
+      required bool isDir,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'send_files',
+          jsonEncode({
+            'id': actId,
+            'path': path,
+            'to': to,
+            'file_num': fileNum,
+            'include_hidden': includeHidden,
+            'is_remote': isRemote,
+            'is_dir': isDir,
+          })
+        ]));
+  }
+
+  Future<void> sessionSetConfirmOverrideFile(
+      {required UuidValue sessionId,
+      required int actId,
+      required int fileNum,
+      required bool needOverride,
+      required bool remember,
+      required bool isUpload,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'confirm_override_file',
+          jsonEncode({
+            'id': actId,
+            'file_num': fileNum,
+            'need_override': needOverride,
+            'remember': remember,
+            'is_upload': isUpload
+          })
+        ]));
+  }
+
+  Future<void> sessionRemoveFile(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required int fileNum,
+      required bool isRemote,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'remove_file',
+          jsonEncode({
+            'id': actId,
+            'path': path,
+            'file_num': fileNum,
+            'is_remote': isRemote
+          })
+        ]));
+  }
+
+  Future<void> sessionReadDirToRemoveRecursive(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required bool isRemote,
+      required bool showHidden,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'read_dir_to_remove_recursive',
+          jsonEncode({
+            'id': actId,
+            'path': path,
+            'is_remote': isRemote,
+            'show_hidden': showHidden
+          })
+        ]));
+  }
+
+  Future<void> sessionRemoveAllEmptyDirs(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required bool isRemote,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'remove_all_empty_dirs',
+          jsonEncode({'id': actId, 'path': path, 'is_remote': isRemote})
+        ]));
+  }
+
+  Future<void> sessionCancelJob(
+      {required UuidValue sessionId, required int actId, dynamic hint}) {
+    return Future(
+        () => js.context.callMethod('setByName', ['cancel_job', actId]));
+  }
+
+  Future<void> sessionCreateDir(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required bool isRemote,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'create_dir',
+          jsonEncode({'id': actId, 'path': path, 'is_remote': isRemote})
+        ]));
+  }
+
+  Future<String> sessionReadLocalDirSync(
+      {required UuidValue sessionId,
+      required String path,
+      required bool showHidden,
+      dynamic hint}) {
+    throw UnimplementedError("sessionReadLocalDirSync");
+  }
+
   Future<String> sessionGetPlatform(
       {required UuidValue sessionId, required bool isRemote, dynamic hint}) {
     if (isRemote) {
@@ -554,6 +708,31 @@ class RustdeskImpl {
     } else {
       return Future(() => 'Web');
     }
+  }
+
+  Future<void> sessionLoadLastTransferJobs(
+      {required UuidValue sessionId, dynamic hint}) {
+    throw UnimplementedError("sessionLoadLastTransferJobs");
+  }
+
+  Future<void> sessionAddJob(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required String to,
+      required int fileNum,
+      required bool includeHidden,
+      required bool isRemote,
+      dynamic hint}) {
+    throw UnimplementedError("sessionAddJob");
+  }
+
+  Future<void> sessionResumeJob(
+      {required UuidValue sessionId,
+      required int actId,
+      required bool isRemote,
+      dynamic hint}) {
+    throw UnimplementedError("sessionResumeJob");
   }
 
   Future<void> sessionElevateDirect(
@@ -1007,8 +1186,41 @@ class RustdeskImpl {
     throw UnimplementedError("mainGetDisplays");
   }
 
+  Future<void> sessionAddPortForward(
+      {required UuidValue sessionId,
+      required int localPort,
+      required String remoteHost,
+      required int remotePort,
+      dynamic hint}) {
+    throw UnimplementedError("sessionAddPortForward");
+  }
+
+  Future<void> sessionRemovePortForward(
+      {required UuidValue sessionId, required int localPort, dynamic hint}) {
+    throw UnimplementedError("sessionRemovePortForward");
+  }
+
   Future<void> sessionNewRdp({required UuidValue sessionId, dynamic hint}) {
     throw UnimplementedError("sessionNewRdp");
+  }
+
+  Future<void> sessionRequestVoiceCall(
+      {required UuidValue sessionId, dynamic hint}) {
+    throw UnimplementedError("sessionRequestVoiceCall");
+  }
+
+  Future<void> sessionCloseVoiceCall(
+      {required UuidValue sessionId, dynamic hint}) {
+    throw UnimplementedError("sessionCloseVoiceCall");
+  }
+
+  Future<void> cmHandleIncomingVoiceCall(
+      {required int id, required bool accept, dynamic hint}) {
+    throw UnimplementedError("cmHandleIncomingVoiceCall");
+  }
+
+  Future<void> cmCloseVoiceCall({required int id, dynamic hint}) {
+    throw UnimplementedError("cmCloseVoiceCall");
   }
 
   Future<String> mainGetLastRemoteId({dynamic hint}) {
@@ -1025,6 +1237,10 @@ class RustdeskImpl {
 
   Future<String> mainGetLangs({dynamic hint}) {
     return Future(() => js.context.callMethod('getByName', ['langs']));
+  }
+
+  Future<String> mainGetTemporaryPassword({dynamic hint}) {
+    return Future.value('');
   }
 
   Future<String> mainGetFingerprint({dynamic hint}) {
@@ -1121,6 +1337,31 @@ class RustdeskImpl {
     return timeoutFuture;
   }
 
+  Future<void> mainSaveGroup({required String json, dynamic hint}) {
+    return Future(
+        () => js.context.callMethod('setByName', ['save_group', json]));
+  }
+
+  Future<void> mainClearGroup({dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', ['clear_group']));
+  }
+
+  Future<String> mainLoadGroup({dynamic hint}) {
+    Completer<String> completer = Completer();
+    Future<String> timeoutFuture = completer.future.timeout(
+      Duration(seconds: 2),
+      onTimeout: () {
+        completer.completeError(TimeoutException('Load group timed out'));
+        return 'Timeout';
+      },
+    );
+    js.context["onLoadGroupFinished"] = (String s) {
+      completer.complete(s);
+    };
+    js.context.callMethod('setByName', ['load_group']);
+    return timeoutFuture;
+  }
+
   Future<void> sessionSendPointer(
       {required UuidValue sessionId, required String msg, dynamic hint}) {
     throw UnimplementedError("sessionSendPointer");
@@ -1190,6 +1431,15 @@ class RustdeskImpl {
 
   Future<void> mainStartService({dynamic hint}) {
     throw UnimplementedError("mainStartService");
+  }
+
+  Future<void> mainUpdateTemporaryPassword({dynamic hint}) {
+    throw UnimplementedError("mainUpdateTemporaryPassword");
+  }
+
+  Future<bool> mainSetPermanentPasswordWithResult(
+      {required String password, dynamic hint}) {
+    throw UnimplementedError("mainSetPermanentPasswordWithResult");
   }
 
   Future<bool> mainCheckSuperUserPermission({dynamic hint}) {
@@ -1385,6 +1635,27 @@ class RustdeskImpl {
     throw UnimplementedError("installInstallPath");
   }
 
+  Future<void> mainAccountAuth(
+      {required String op, required bool rememberMe, dynamic hint}) {
+    // Safari only allows auth popups while handling the original user gesture.
+    // Use Future.sync so the JS call runs synchronously (pre-opening the OIDC
+    // window) while any interop error still surfaces as a Future error.
+    return Future.sync(() => js.context.callMethod('setByName', [
+          'account_auth',
+          jsonEncode({'op': op, 'remember': rememberMe})
+        ]));
+  }
+
+  Future<void> mainAccountAuthCancel({dynamic hint}) {
+    return Future(
+        () => js.context.callMethod('setByName', ['account_auth_cancel']));
+  }
+
+  Future<String> mainAccountAuthResult({dynamic hint}) {
+    return Future(
+        () => js.context.callMethod('getByName', ['account_auth_result']));
+  }
+
   Future<void> mainOnMainWindowClose({dynamic hint}) {
     throw UnimplementedError("mainOnMainWindowClose");
   }
@@ -1480,11 +1751,31 @@ class RustdeskImpl {
     return false;
   }
 
+  String mainDefaultPrivacyModeImpl({dynamic hint}) {
+    throw UnimplementedError("mainDefaultPrivacyModeImpl");
+  }
+
+  String mainSupportedPrivacyModeImpls({dynamic hint}) {
+    return '[]';
+  }
+
   String mainSupportedInputSource({dynamic hint}) {
     return jsonEncode([
       ['Input source 1', 'input_source_1_tip'],
       ['Input source 2', 'input_source_2_tip']
     ]);
+  }
+
+  Future<String> mainGenerate2Fa({dynamic hint}) {
+    throw UnimplementedError("mainGenerate2Fa");
+  }
+
+  Future<bool> mainVerify2Fa({required String code, dynamic hint}) {
+    throw UnimplementedError("mainVerify2Fa");
+  }
+
+  bool mainHasValid2FaSync({dynamic hint}) {
+    throw UnimplementedError("mainHasValid2FaSync");
   }
 
   String mainGetHardOption({required String key, dynamic hint}) {
@@ -1547,6 +1838,15 @@ class RustdeskImpl {
     throw UnimplementedError("mainClearTrustedDevices");
   }
 
+  Future<String> getVoiceCallInputDevice({required bool isCm, dynamic hint}) {
+    throw UnimplementedError("getVoiceCallInputDevice");
+  }
+
+  Future<void> setVoiceCallInputDevice(
+      {required bool isCm, required String device, dynamic hint}) {
+    throw UnimplementedError("setVoiceCallInputDevice");
+  }
+
   bool isPresetPasswordMobileOnly({dynamic hint}) {
     throw UnimplementedError("isPresetPasswordMobileOnly");
   }
@@ -1573,6 +1873,37 @@ class RustdeskImpl {
       required bool includeHidden,
       dynamic hint}) {
     throw UnimplementedError("sessionReadLocalEmptyDirsRecursiveSync");
+  }
+
+  Future<void> sessionReadRemoteEmptyDirsRecursiveSync(
+      {required UuidValue sessionId,
+      required String path,
+      required bool includeHidden,
+      dynamic hint}) {
+    throw UnimplementedError("sessionReadRemoteEmptyDirsRecursiveSync");
+  }
+
+  Future<void> sessionRenameFile(
+      {required UuidValue sessionId,
+      required int actId,
+      required String path,
+      required String newName,
+      required bool isRemote,
+      dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', [
+          'rename_file',
+          jsonEncode({
+            'id': actId,
+            'path': path,
+            'new_name': newName,
+            'is_remote': isRemote
+          })
+        ]));
+  }
+
+  Future<void> sessionSelectFiles(
+      {required UuidValue sessionId, dynamic hint}) {
+    return Future(() => js.context.callMethod('setByName', ['select_files']));
   }
 
   String? sessionGetConnToken({required UuidValue sessionId, dynamic hint}) {

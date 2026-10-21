@@ -40,6 +40,7 @@ class LoadEvent {
   static const String favorite = 'load_fav_peers';
   static const String lan = 'load_lan_peers';
   static const String addressBook = 'load_address_book_peers';
+  static const String group = 'load_group_peers';
 }
 
 class PeersModelName {
@@ -47,6 +48,7 @@ class PeersModelName {
   static const String favorite = 'fav peer';
   static const String lan = 'discovered peer';
   static const String addressBook = 'address book peer';
+  static const String group = 'group peer';
 }
 
 /// for peer search text, global obs value
@@ -423,14 +425,22 @@ abstract class BasePeersView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Peers peers;
-    if (peerTabIndex == PeerTabIndex.recent) {
-      peers = gFFI.recentPeersModel;
-    } else if (peerTabIndex == PeerTabIndex.fav) {
-      peers = gFFI.favoritePeersModel;
-    } else if (peerTabIndex == PeerTabIndex.lan) {
-      peers = gFFI.lanPeersModel;
-    } else {
-      peers = gFFI.abModel.peersModel;
+    switch (peerTabIndex) {
+      case PeerTabIndex.recent:
+        peers = gFFI.recentPeersModel;
+        break;
+      case PeerTabIndex.fav:
+        peers = gFFI.favoritePeersModel;
+        break;
+      case PeerTabIndex.lan:
+        peers = gFFI.lanPeersModel;
+        break;
+      case PeerTabIndex.ab:
+        peers = gFFI.abModel.peersModel;
+        break;
+      case PeerTabIndex.group:
+        peers = gFFI.groupModel.peersModel;
+        break;
     }
     return _PeersView(
         peers: peers,
@@ -541,5 +551,48 @@ class AddressBookPeersView extends BasePeersView {
       }
       return false;
     }
+  }
+}
+
+class MyGroupPeerView extends BasePeersView {
+  MyGroupPeerView(
+      {Key? key, EdgeInsets? menuPadding, ScrollController? scrollController})
+      : super(
+          key: key,
+          peerTabIndex: PeerTabIndex.group,
+          peerFilter: filter,
+          peerCardBuilder: (Peer peer) => MyGroupPeerCard(
+            peer: peer,
+            menuPadding: menuPadding,
+          ),
+        );
+
+  static bool filter(Peer peer) {
+    final model = gFFI.groupModel;
+    if (model.searchAccessibleItemNameText.isNotEmpty) {
+      final text = model.searchAccessibleItemNameText.value.toLowerCase();
+      final searchPeersOfUser = model.users.any((user) =>
+          user.name == peer.loginName &&
+          (user.name.toLowerCase().contains(text) ||
+              user.displayNameOrName.toLowerCase().contains(text)));
+      final searchPeersOfDeviceGroup =
+          peer.device_group_name.toLowerCase().contains(text) &&
+              model.deviceGroups.any((g) => g.name == peer.device_group_name);
+      if (!searchPeersOfUser && !searchPeersOfDeviceGroup) {
+        return false;
+      }
+    }
+    if (model.selectedAccessibleItemName.isNotEmpty) {
+      if (model.isSelectedDeviceGroup.value) {
+        if (model.selectedAccessibleItemName.value != peer.device_group_name) {
+          return false;
+        }
+      } else {
+        if (model.selectedAccessibleItemName.value != peer.loginName) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 }

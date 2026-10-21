@@ -4,6 +4,7 @@ use super::drmtap_dl::{
     self, drmtap_config, drmtap_ctx, drmtap_cursor_info, drmtap_device, drmtap_display,
     drmtap_dmabuf_desc, drmtap_frame_info, DrmtapLib,
 };
+use hbb_common::log;
 use std::ffi::CString;
 use std::io;
 use std::os::fd::{FromRawFd, OwnedFd};
@@ -431,9 +432,9 @@ impl DrmReader {
             let ret = (self.lib.grab_mapped)(self.ctx, &mut frame);
             if ret < 0 {
                 let errno = -ret;
-                if errno == libc::EAGAIN
-                    || errno == libc::EBUSY
-                    || errno == libc::EINTR
+                if errno == hbb_common::libc::EAGAIN
+                    || errno == hbb_common::libc::EBUSY
+                    || errno == hbb_common::libc::EINTR
                 {
                     return Err(io::ErrorKind::WouldBlock.into());
                 }
@@ -584,13 +585,13 @@ impl DrmReader {
             let ret = grab_desc(self.ctx, &mut desc, &mut frame);
             if ret < 0 {
                 let errno = -ret;
-                if errno == libc::EAGAIN
-                    || errno == libc::EBUSY
-                    || errno == libc::EINTR
+                if errno == hbb_common::libc::EAGAIN
+                    || errno == hbb_common::libc::EBUSY
+                    || errno == hbb_common::libc::EINTR
                 {
                     return Err(io::ErrorKind::WouldBlock.into());
                 }
-                if errno == libc::ENOTSUP {
+                if errno == hbb_common::libc::ENOTSUP {
                     // A distinct error so the caller degrades to the mapped/PipeWire path instead of tight-looping a rebuild.
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -651,7 +652,7 @@ impl DrmReader {
             }
             // dup BEFORE releasing the frame: after release the library may recycle its handle, while an independent fd on the same open dma-buf
             // keeps the buffer alive for the peer. F_DUPFD_CLOEXEC, not dup(): `dup` never copies close-on-exec and this root service forks elsewhere.
-            let dup_fd = libc::fcntl(raw_fd, libc::F_DUPFD_CLOEXEC, 0);
+            let dup_fd = hbb_common::libc::fcntl(raw_fd, hbb_common::libc::F_DUPFD_CLOEXEC, 0);
             if dup_fd < 0 {
                 let e = io::Error::last_os_error();
                 (self.lib.frame_release)(self.ctx, &mut frame);
@@ -914,7 +915,7 @@ const DRM_MODE_ROTATE_0: u32 = 1 << 0;
 fn plane_rotation_answer(rc: c_int, rotation: u32) -> Option<u32> {
     if rc == 0 {
         Some(rotation)
-    } else if rc == -libc::ENOTSUP {
+    } else if rc == -hbb_common::libc::ENOTSUP {
         Some(DRM_MODE_ROTATE_0)
     } else {
         None
@@ -929,10 +930,10 @@ mod plane_rotation_tests {
     fn a_plane_without_the_property_turned_nothing() {
         assert_eq!(plane_rotation_answer(0, 0x4), Some(0x4));
         assert_eq!(plane_rotation_answer(0, 0x1), Some(0x1));
-        assert_eq!(plane_rotation_answer(-libc::ENOTSUP, 0), Some(0x1));
-        assert_eq!(plane_rotation_answer(-libc::ENOENT, 0), None);
-        assert_eq!(plane_rotation_answer(-libc::EINVAL, 0), None);
-        assert_eq!(plane_rotation_answer(-libc::EIO, 7), None);
+        assert_eq!(plane_rotation_answer(-hbb_common::libc::ENOTSUP, 0), Some(0x1));
+        assert_eq!(plane_rotation_answer(-hbb_common::libc::ENOENT, 0), None);
+        assert_eq!(plane_rotation_answer(-hbb_common::libc::EINVAL, 0), None);
+        assert_eq!(plane_rotation_answer(-hbb_common::libc::EIO, 7), None);
     }
 }
 
@@ -988,7 +989,7 @@ mod crtc_refresh_tests {
         NUM.store(148352, Ordering::SeqCst);
         DEN.store(2475, Ordering::SeqCst);
         assert_eq!(r.crtc_refresh(), Some((148352, 2475)));
-        RC.store(-libc::ENODATA, Ordering::SeqCst);
+        RC.store(-hbb_common::libc::ENODATA, Ordering::SeqCst);
         assert_eq!(r.crtc_refresh(), None, "a CRTC with no mode");
         RC.store(0, Ordering::SeqCst);
         DEN.store(0, Ordering::SeqCst);

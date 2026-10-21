@@ -10,8 +10,11 @@ use crate::codec::{base_bitrate, codec_thread_num};
 use crate::{codec::EncoderApi, EncodeFrame, STRIDE_ALIGN};
 use crate::{common::GoogleImage, generate_call_macro, generate_call_ptr_macro, Error, Result};
 use crate::{EncodeInput, EncodeYuvFormat, Pixfmt};
-use anyhow::{anyhow, Context, Result as ResultType};
-use bytes::Bytes;
+use hbb_common::{
+    anyhow::{anyhow, Context},
+    bytes::Bytes,
+    log, ResultType,
+};
 use base::message_proto::{Chroma, EncodedVideoFrame, EncodedVideoFrames, VideoFrame};
 use std::{ptr, slice};
 

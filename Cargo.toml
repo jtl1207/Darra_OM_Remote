@@ -13,13 +13,20 @@ name = "librustdesk"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [[bin]]
+name = "naming"
+path = "src/naming.rs"
+
+[[bin]]
 name = "service"
 path = "src/service.rs"
 
 [features]
 inline = []
+use_samplerate = ["samplerate", "libsamplerate-sys"]
+use_rubato = ["rubato"]
+use_dasp = ["dasp"]
 flutter = ["flutter_rust_bridge"]
-default = []
+default = ["use_dasp"]
 hwcodec = ["scrap/hwcodec"]
 vram = ["scrap/vram"]
 mediacodec = ["scrap/mediacodec"]
@@ -30,38 +37,78 @@ drm = ["scrap/drm"]
 # kind of operation and deserves a switch that can remove it from the binary entirely, without
 # giving up DRM capture: `--features drm` builds the capture path with no wake code compiled in.
 drm-wake = ["drm"]
-linux-pkg-config = ["scrap/linux-pkg-config"]
+linux-pkg-config = ["magnum-opus/linux-pkg-config", "scrap/linux-pkg-config"]
+unix-file-copy-paste = [
+    "dep:x11-clipboard",
+    "dep:x11rb",
+    "dep:percent-encoding",
+    "dep:once_cell",
+    "clipboard/unix-file-copy-paste",
+]
+screencapturekit = ["cpal/screencapturekit"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1"
 scrap = { path = "libs/scrap", features = ["wayland"] }
+hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
 base = { path = "libs/base" }
-log = "0.4"
 serde_derive = "1.0"
 serde = "1.0"
 serde_json = "1.0"
+serde_repr = "0.1"
+cfg-if = "1.0"
 lazy_static = "1.4"
 sha2 = "0.10"
+repng = "0.2"
 zstd = "0.13"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 parity-tokio-ipc = { git = "https://github.com/rustdesk-org/parity-tokio-ipc" }
+magnum-opus = { git = "https://github.com/rustdesk-org/magnum-opus" }
+dasp = { version = "0.11", features = ["signal", "interpolate-linear", "interpolate"], optional = true }
+rubato = { version = "0.12", optional = true }
+samplerate = { version = "0.2", optional = true }
+libsamplerate-sys = { version = "0.1.12", optional = true }
 uuid = { version = "1.3", features = ["v4"] }
 num_cpus = "1.15"
 bytes = { version = "1.4", features = ["serde"] }
+default-net = "0.14"
+wol-rs = "1.0"
 flutter_rust_bridge = { version = "=1.80", features = ["uuid"], optional = true}
 errno = "0.3"
 rdev = { git = "https://github.com/rustdesk-org/rdev" }
 url = { version = "2.3", features = ["serde"] }
+crossbeam-queue = "0.3"
 hex = "0.4"
+chrono = "0.4"
+cidr-utils = "0.5"
+fon = "0.6"
 shutdown_hooks = "0.1"
+totp-rs = { version = "5.4", default-features = false, features = ["gen_secret", "otpauth"] }
+stunclient = "0.4"
+kcp-sys= { git = "https://github.com/rustdesk-org/kcp-sys", branch = "rustdesk-patches" }
+reqwest = { version = "0.12", features = ["blocking", "socks", "json", "native-tls", "rustls-tls", "rustls-tls-native-roots", "gzip", "zstd"], default-features=false }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# https://github.com/rustdesk/rustdesk/discussions/10197, not use cpal on linux
+cpal = { git = "https://github.com/rustdesk-org/cpal", branch = "osx-screencapturekit" }
+ringbuf = "0.3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+mac_address = "1.1"
 sciter-rs = { git = "https://github.com/rustdesk-org/rust-sciter", branch = "dyn" }
 sys-locale = "0.3"
 enigo = { path = "libs/enigo", features = [ "with_serde" ] }
+clipboard = { path = "libs/clipboard" }
 ctrlc = "3.2"
 # arboard = { version = "3.4", features = ["wayland-data-control"] }
 arboard = { git = "https://github.com/rustdesk-org/arboard", features = ["wayland-data-control"] }
+clipboard-master = { git = "https://github.com/rustdesk-org/clipboard-master" }
+portable-pty = { git = "https://github.com/rustdesk-org/wezterm", branch = "rustdesk/pty_based_0.8.1", package = "portable-pty" }
+
+system_shutdown = "4.0"
+qrcode-generator = "4.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = [
@@ -101,6 +148,7 @@ windows = { version = "0.61", features = [
 ] }
 winreg = "0.11"
 windows-service = "0.6"
+virtual_display = { path = "libs/virtual_display" }
 remote_printer = { path = "libs/remote_printer" }
 impersonate_system = { git = "https://github.com/rustdesk-org/impersonate-system" }
 shared_memory = "0.12"
@@ -138,8 +186,17 @@ ttf-parser = "0.25"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libxdo-sys = "0.11"
+psimple = { package = "libpulse-simple-binding", version = "2.27" }
+pulse = { package = "libpulse-binding", version = "2.27" }
+rust-pulsectl = { git = "https://github.com/rustdesk-org/pulsectl" }
+async-process = "1.7"
+evdev = { git="https://github.com/rustdesk-org/evdev" }
 dbus = "0.9"
 dbus-crossroads = "0.5"
+x11-clipboard = {git="https://github.com/clslaid/x11-clipboard", branch = "feat/store-batch", optional = true}
+x11rb =  {version = "0.12", features = ["all-extensions"], optional = true}
+percent-encoding = {version = "2.3", optional = true}
+once_cell = {version = "1.18", optional = true}
 nix = { version = "0.29", features = ["term", "process"]}
 gtk = "0.18"
 termios = "0.3"
@@ -157,7 +214,7 @@ jni = "0.21"
 android-wakelock = { git = "https://github.com/rustdesk-org/android-wakelock" }
 
 [workspace]
-members = ["libs/scrap", "libs/base", "libs/enigo", "libs/portable", "libs/remote_printer"]
+members = ["libs/scrap", "libs/hbb_common", "libs/base", "libs/enigo", "libs/clipboard", "libs/virtual_display", "libs/virtual_display/dylib", "libs/portable", "libs/remote_printer"]
 exclude = ["vdi/host"]
 
 # Patch libxdo-sys to use a stub implementation that doesn't require libxdo
@@ -210,10 +267,11 @@ winapi = { version = "0.3", features = [ "winnt", "pdh", "synchapi" ] }
 
 [build-dependencies]
 cc = "1.0"
-chrono = "0.4"
+hbb_common = { path = "libs/hbb_common" }
 os-version = "0.2"
 
 [dev-dependencies]
+hound = "3.5"
 docopt = "1.1"
 tokio = "1.44"
 

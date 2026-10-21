@@ -220,7 +220,7 @@ impl Capturer {
                 if hres == S_OK {
                     return hres;
                 }
-                log::warn!(
+                hbb_common::log::warn!(
                     "HDR DuplicateOutput1 failed: hr={:#x}, fallback=DuplicateOutput",
                     hres as u32
                 );
@@ -262,10 +262,10 @@ impl Capturer {
         if hdr::is_permanent(&err) {
             hdr::UNAVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        log::error!("HDR tone-map failed, re-duplicating without it: {err}");
+        hbb_common::log::error!("HDR tone-map failed, re-duplicating without it: {err}");
         self.hdr = None;
         if let Err(release_err) = self.release_frame() {
-            log::warn!("DXGI frame cleanup failed while disabling HDR: {release_err}");
+            hbb_common::log::warn!("DXGI frame cleanup failed while disabling HDR: {release_err}");
         }
         self.duplication = ComPtr(ptr::null_mut());
         let mut duplication = ptr::null_mut();

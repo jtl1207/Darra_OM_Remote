@@ -28,8 +28,8 @@ class KeyboardShortcutActionSubgroup extends KeyboardShortcutActionGroupChild {
 /// A top-level group ("Display", "Keyboard", "Chat", …). `children` is an
 /// *ordered* mix of direct entries and subgroups, so layouts like
 /// "subgroups first → direct items → trailing subgroup" — exactly the
-/// shape `_DisplayMenu` uses (cursor / display toggles as direct items) —
-/// are first-class instead of needing a wrapper
+/// shape `_DisplayMenu` uses (Privacy mode lives after the cursor / display
+/// toggles direct items) — are first-class instead of needing a wrapper
 /// "Display Settings" subgroup just to insert the items.
 class KeyboardShortcutActionGroup {
   final String titleKey;
@@ -71,9 +71,9 @@ final List<KeyboardShortcutActionGroup> kKeyboardShortcutActionGroups = [
     KeyboardShortcutActionEntry(kShortcutActionScreenshot, 'Take screenshot'),
   ]),
   // Display: subgroups (View Mode → Image Quality → Codec → Virtual display)
-  // first, then the direct items (cursor toggles + display toggles) —
-  // matching `_DisplayMenu.menuChildrenGetter` exactly. Rebalancing this
-  // order should also rebalance the toolbar.
+  // first, then the direct items (cursor toggles + display toggles), then
+  // Privacy mode subgroup last — matching `_DisplayMenu.menuChildrenGetter`
+  // exactly. Rebalancing this order should also rebalance the toolbar.
   KeyboardShortcutActionGroup('Display', [
     KeyboardShortcutActionSubgroup('View Mode', [
       KeyboardShortcutActionEntry(
@@ -116,11 +116,26 @@ final List<KeyboardShortcutActionGroup> kKeyboardShortcutActionGroups = [
         kShortcutActionToggleQualityMonitor, 'Show quality monitor'),
     KeyboardShortcutActionEntry(kShortcutActionToggleMute, 'Mute'),
     KeyboardShortcutActionEntry(
+        kShortcutActionToggleEnableFileCopyPaste, 'Enable file copy and paste'),
+    KeyboardShortcutActionEntry(
         kShortcutActionToggleDisableClipboard, 'Disable clipboard'),
     KeyboardShortcutActionEntry(
         kShortcutActionToggleLockAfterSessionEnd, 'Lock after session end'),
     KeyboardShortcutActionEntry(
         kShortcutActionToggleTrueColor, 'True color (4:4:4)'),
+    // Privacy mode at the bottom — mirrors `_DisplayMenu` where it's the
+    // last submenu added (line ~1023 of remote_toolbar.dart, after toggles).
+    KeyboardShortcutActionSubgroup('Privacy mode', [
+      // Reuse toolbar's existing impl-name i18n keys. The handler at
+      // runtime matches `privacy_mode_impl_mag_tip` /
+      // `privacy_mode_impl_virtual_display_tip` against the peer's
+      // advertised impls — same logic the toolbar's `toolbarPrivacyMode`
+      // submenu uses.
+      KeyboardShortcutActionEntry(
+          kShortcutActionPrivacyMode1, 'privacy_mode_impl_mag_tip'),
+      KeyboardShortcutActionEntry(
+          kShortcutActionPrivacyMode2, 'privacy_mode_impl_virtual_display_tip'),
+    ]),
   ]),
   // Keyboard: Keyboard mode subgroup first, then direct items
   // (inputSource → viewMode → showMyCursor → toolbarKeyboardToggles),
@@ -147,6 +162,7 @@ final List<KeyboardShortcutActionGroup> kKeyboardShortcutActionGroups = [
   ]),
   KeyboardShortcutActionGroup('Chat', [
     KeyboardShortcutActionEntry(kShortcutActionToggleChat, 'Text chat'),
+    KeyboardShortcutActionEntry(kShortcutActionToggleVoiceCall, 'Voice call'),
   ]),
   // "Other" collects single-icon toolbar buttons that have no dropdown
   // (Pin, Close), plus actions with no toolbar entry at all (Fullscreen —
@@ -239,6 +255,9 @@ List<KeyboardShortcutActionGroup> filterKeyboardShortcutActionGroupsForPlatform(
         (id == kShortcutActionViewModeOriginal ||
             id == kShortcutActionViewModeAdaptive ||
             id == kShortcutActionViewModeCustom)) {
+      return false;
+    }
+    if (!cap.includeVoiceCallShortcut && id == kShortcutActionToggleVoiceCall) {
       return false;
     }
     return true;

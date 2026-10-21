@@ -135,7 +135,7 @@ impl Display {
         let mut displays_dxgi = match Self::all_() {
             Ok(displays) => displays,
             Err(e) => {
-                log::error!("DXGI display enumeration failed: {e}");
+                hbb_common::log::error!("DXGI display enumeration failed: {e}");
                 Vec::new()
             }
         };

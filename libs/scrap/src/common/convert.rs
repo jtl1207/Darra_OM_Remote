@@ -9,7 +9,7 @@ include!(concat!(env!("OUT_DIR"), "/yuv_ffi.rs"));
 #[cfg(not(target_os = "ios"))]
 use crate::PixelBuffer;
 use crate::{generate_call_macro, EncodeYuvFormat, TraitPixelBuffer};
-use anyhow::{bail, Result as ResultType};
+use hbb_common::{bail, log, ResultType};
 
 generate_call_macro!(call_yuv, false);
 

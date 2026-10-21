@@ -10,8 +10,11 @@ use crate::{
     AdapterDevice, CodecFormat, EncodeInput, EncodeYuvFormat, Pixfmt,
 };
 use base::message_proto::{EncodedVideoFrame, EncodedVideoFrames, VideoFrame};
-use anyhow::{anyhow, bail, Context, Result as ResultType};
-use bytes::Bytes;
+use hbb_common::{
+    anyhow::{anyhow, bail, Context},
+    bytes::Bytes,
+    log, ResultType,
+};
 pub use hwcodec::common::Driver;
 use hwcodec::{
     common::{DataFormat, MAX_GOP},

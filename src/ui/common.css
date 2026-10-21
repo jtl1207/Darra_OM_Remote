@@ -86,7 +86,7 @@ button.link {
   cursor: pointer;
 }
 
-input[type=text], input[type=number] {
+input[type=text], input[type=password], input[type=number] {
     width: *;
     font-size: 1.5em;
     border-color: color(border);
@@ -134,6 +134,19 @@ textarea:empty {
 
 .ellipsis {
   @ELLIPSIS;
+}
+
+div.password svg:not(.checkmark) {
+    padding-left: 1em;
+    size: 16px;
+    color: #ddd;
+    background: none;
+    padding-top: 4px!important;
+}
+
+div.password input {
+    font-family: Consolas, Menlo, Monaco, 'Courier New';
+    font-size: 1.2em;
 }
 
 div.username input {
@@ -237,6 +250,217 @@ header caption {
     size: 12px;
     background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMAQMAAABsu86kAAAABlBMVEUAAAAAAAClZ7nPAAAAAXRSTlMAQObYZgAAAB1JREFUCNdjsP/AoCDA8P8CQ0MABipgaHBg+H8AAMfSC36WAZteAAAAAElFTkSuQmCC');
 }
+}
+
+div.chatbox {
+  size: *;
+}
+
+div.chatbox div.send svg {
+  size: 16px;
+}
+
+div.chatbox div.send span:active {
+  opacity: 0.5;
+}
+
+div.chatbox div.send span {
+  display: inline-block;
+  padding: 6px;
+}
+
+div.chatbox .msgs {
+  border: none;
+  size: *;
+  border-bottom: color(border) 1px solid;
+  overflow-x: hidden;
+  overflow-y: scroll-indicator;
+  border-spacing: 1em;
+  padding: 1em;
+}
+
+div.chatbox div.send {
+  flow: horizontal;
+  height: 30px;
+  padding: 5px;
+}
+
+div.chatbox div.send input {
+  height: 20px !important;
+}
+
+div.chatbox div.name {
+  color: color(dark-green);
+}
+
+div.chatbox div.right-side div {
+  text-align: right;
+}
+
+div.chatbox div.text {
+    margin-top: 0.5em;
+}
+
+@media platform != "OSX" {
+header .window-toolbar {
+  width: max-content;
+  background: transparent;
+  position: absolute;
+  bottom: 4px;
+  height: 24px;
+}
+}
+
+header svg, menu svg {
+  size: 14px;
+}
+
+header span, menu span {
+  padding: 4px 8px;
+  margin: * 0.5em;
+  color: color(light-text);
+}
+
+progress {
+    display: inline-block;
+    aspect: Progress;
+    border: none;
+    margin-right: 1em;
+    height: 0.25em;
+    background: transparent;
+}
+
+menu {
+  background: color(bg);
+}
+
+menu div.separator {
+  height: 1px;
+  width: *;
+  margin: 5px 0;
+  background: color(gray-bg);
+  border: none;
+}
+
+menu li {
+  color: color(text);
+  position: relative;
+}
+
+menu li span {
+  display: none;
+}
+
+menu li.selected span:nth-child(1) {
+  display: inline-block;
+  position: absolute;
+  left: -10px;
+  top: 2px;
+}
+
+.link {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link:active {
+  opacity: 0.5;
+}
+
+menu li:hover {
+  background: color(menu-hover);
+  color: color(text);
+}
+
+menu li.line-through, menu li.line-through :hover {
+  text-decoration-line: line-through;
+  color: red;
+}
+
+#tags {
+    size: *;
+    padding: 0.5em;
+    overflow-y: scroll-indicator;
+    border-spacing: 0.5em;
+    flow: horizontal-flow;
+}
+
+#tags span {
+    background: color(gray-bg);
+    display: inline-block;
+    border-radius: 6px;
+    padding: 3px 0.5em;
+    word-wrap: normal;
+}
+
+#tags span.active {
+    background: color(button);
+    border-color: color(button);
+    color: white;
+}
+
+#tags span:hover {
+    border-color: color(hover-border);
+}
+
+div#msgbox .msgbox-icon svg {
+  size: 80px;
+  background: white;
+
+}
+
+div#msgbox .form {
+  border-spacing: 0.5em;
+}
+
+div#msgbox .caption {
+  @ELLIPSIS;
+  height: 2em;
+  line-height: 2em;
+  text-align: center;
+  color: color(bg);
+  font-weight: bold;
+}
+
+div#msgbox .form .text {
+  @ELLIPSIS;
+}
+
+div#msgbox button.button {
+  margin-left: 1.6em;
+}
+
+div#msgbox div.password {
+  position: relative;
+}
+
+div#msgbox div.password svg {
+  position: absolute;
+  right: 0.25em;
+  top: 0.25em;
+  padding: 0.5em;
+  color: color(text);
+}
+
+div#msgbox div.set-password > div {
+  flow: horizontal;
+}
+
+div#msgbox div.set-password > div > span {
+  width: 30%;
+  line-height: 2em;
+}
+
+div#msgbox div.set-password div.password {
+  width: *;
+}
+
+div#msgbox div.set-password div > input {
+  width: *;
+}
+
+div#msgbox div.set-password input {
+  font-size: 1em;
 }
 
 .wrap-text {

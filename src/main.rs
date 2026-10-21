@@ -11,6 +11,8 @@ fn main() {
         eprintln!("Global initialization failed.");
         return;
     }
+    common::test_rendezvous_server();
+    common::test_nat_type();
     common::global_clean();
 }
 
@@ -29,7 +31,7 @@ fn main() -> std::process::ExitCode {
         }
         Some(crate::core_main::CoreMainAction::ExitFailure(err)) => {
             eprintln!("Command failed: {err}");
-            log::error!("Command failed: {err}");
+            hbb_common::log::error!("Command failed: {err}");
             std::process::ExitCode::FAILURE
         }
         None => std::process::ExitCode::SUCCESS,

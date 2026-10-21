@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 #include "resource.h"
@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Darra" "\0"
-            VALUE "FileDescription", "Darra 远程" "\0"
+            VALUE "CompanyName", "Purslane Tech Pte. Ltd." "\0"
+            VALUE "FileDescription", "RustDesk Remote Desktop" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "Darra远程控制" "\0"
-            VALUE "LegalCopyright", "Copyright © 2026 Darra. All rights reserved." "\0"
-            VALUE "OriginalFilename", "Darra远程控制.exe" "\0"
-            VALUE "ProductName", "Darra 远程" "\0"
+            VALUE "InternalName", "rustdesk" "\0"
+            VALUE "LegalCopyright", "Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved." "\0"
+            VALUE "OriginalFilename", "rustdesk.exe" "\0"
+            VALUE "ProductName", "RustDesk" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

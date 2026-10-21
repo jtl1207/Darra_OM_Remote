@@ -7,8 +7,8 @@
 
 use crate::{Key, KeyboardControllable, MouseButton, MouseControllable};
 
-use libc::c_int;
-use x11::xlib::{Display, XCloseDisplay, XGetPointerMapping, XOpenDisplay};
+use hbb_common::libc::c_int;
+use hbb_common::x11::xlib::{Display, XCloseDisplay, XGetPointerMapping, XOpenDisplay};
 use libxdo_sys::{self, xdo_t, CURRENTWINDOW};
 use std::{borrow::Cow, ffi::CString};
 

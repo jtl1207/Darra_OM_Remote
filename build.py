@@ -975,9 +975,8 @@ def build_flutter_windows(version, features, skip_portable_pack):
     os.chdir('flutter')
     system2('flutter build windows --release')
     os.chdir('..')
-    if os.path.exists('target/release/deps/dylib_virtual_display.dll'):
-        shutil.copy2('target/release/deps/dylib_virtual_display.dll',
-                     flutter_build_dir_2)
+    shutil.copy2('target/release/deps/dylib_virtual_display.dll',
+                 flutter_build_dir_2)
     if skip_portable_pack:
         return
     os.chdir('libs/portable')
@@ -1036,11 +1035,10 @@ def main():
     res_dir = 'resources'
     external_resources(flutter, args, res_dir)
     if windows:
-        # 虚拟显示动态库随连接引擎一并移除;目录存在时才构建(兼容保留树)
-        if os.path.isdir('libs/virtual_display/dylib'):
-            os.chdir('libs/virtual_display/dylib')
-            system2('cargo build --locked --release')
-            os.chdir('../../..')
+        # build virtual display dynamic library
+        os.chdir('libs/virtual_display/dylib')
+        system2('cargo build --locked --release')
+        os.chdir('../../..')
 
         if flutter:
             build_flutter_windows(version, features, args.skip_portable_pack)

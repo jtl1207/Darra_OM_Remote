@@ -30,20 +30,10 @@ vram = ["hwcodec/vram"]
 cfg-if = "1.0"
 num_cpus = "1.15"
 lazy_static = "1.4"
+hbb_common = { path = "../hbb_common" }
 base = { path = "../base" }
-log = "0.4"
-anyhow = "1.0"
-libc = "0.2"
-bytes = { version = "1.10", features = ["serde"] }
-protobuf = { version = "3.7", features = ["with-bytes"] }
-rand = "0.8"
-regex = "1.11"
-libloading = "0.8"
-tokio = { version = "1.44", features = ["full"] }
-serde_json = "1.0"
+webm = { git = "https://github.com/rustdesk-org/rust-webm" }
 serde = {version="1.0", features=["derive"]}
-# 与原 base 同源的 sysinfo 分支(codec.rs 的系统信息查询)
-sysinfo = { git = "https://github.com/rustdesk-org/sysinfo", branch = "rlim_max" }
 
 [dependencies.winapi]
 version = "0.3"
@@ -66,7 +56,6 @@ ndk-context = "0.1"
 repng = "0.2"
 docopt = "1.1"
 quest = "0.3"
-env_logger = "0.11"
 
 [build-dependencies]
 target_build_utils = "0.3"

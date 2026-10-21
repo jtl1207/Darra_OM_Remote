@@ -1,5 +1,5 @@
 use super::{common_enum, is_name_equal, printer::get_printer_installed_on_port};
-use anyhow::{bail, Result as ResultType};
+use hbb_common::{bail, ResultType};
 use std::{io, ptr::null_mut};
 use winapi::{
     shared::minwindef::{BOOL, DWORD, FALSE, LPBYTE, LPDWORD},

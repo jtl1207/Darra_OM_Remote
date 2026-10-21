@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_hbb/common/widgets/login.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/models/web_video_frame_queue.dart';
 
@@ -144,6 +145,9 @@ class PlatformFFI {
     context['dialog'] = (type, title, text) {
       final uuid = Uuid();
       msgBox(SessionID(uuid.v4()), type, title, text, '', gFFI.dialogManager);
+    };
+    context['loginDialog'] = () {
+      loginDialog();
     };
     context['closeConnection'] = () {
       gFFI.dialogManager.dismissAll();

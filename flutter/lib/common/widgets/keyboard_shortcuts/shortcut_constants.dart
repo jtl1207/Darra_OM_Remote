@@ -42,6 +42,8 @@ const kShortcutActionToggleQualityMonitor = 'toggle_quality_monitor';
 const kShortcutActionToggleShowRemoteCursor = 'toggle_show_remote_cursor';
 const kShortcutActionToggleShowMyCursor = 'toggle_show_my_cursor';
 const kShortcutActionToggleDisableClipboard = 'toggle_disable_clipboard';
+const kShortcutActionPrivacyMode1 = 'privacy_mode_1';
+const kShortcutActionPrivacyMode2 = 'privacy_mode_2';
 // Keyboard mode (Map / Translate / Legacy).
 const kShortcutActionKeyboardModeMap = 'keyboard_mode_map';
 const kShortcutActionKeyboardModeTranslate = 'keyboard_mode_translate';
@@ -69,11 +71,13 @@ const kShortcutActionToggleSwapLeftRightMouse = 'toggle_swap_left_right_mouse';
 const kShortcutActionToggleLockAfterSessionEnd = 'toggle_lock_after_session_end';
 const kShortcutActionToggleTrueColor = 'toggle_true_color';
 const kShortcutActionToggleSwapCtrlCmd = 'toggle_swap_ctrl_cmd';
+const kShortcutActionToggleEnableFileCopyPaste = 'toggle_enable_file_copy_paste';
 const kShortcutActionViewModeCustom = 'view_mode_custom';
 const kShortcutActionImageQualityBest = 'image_quality_best';
 const kShortcutActionImageQualityBalanced = 'image_quality_balanced';
 const kShortcutActionImageQualityLow = 'image_quality_low';
 const kShortcutActionSendClipboardKeystrokes = 'send_clipboard_keystrokes';
+const kShortcutActionToggleVoiceCall = 'toggle_voice_call';
 const kShortcutActionToggleViewOnly = 'toggle_view_only';
 
 const kShortcutLocalConfigKey = 'keyboard-shortcuts';

@@ -1,6 +1,6 @@
 use super::ffi::*;
 use super::Display;
-use libc;
+use hbb_common::libc;
 use std::{io, ptr, slice};
 
 pub struct Capturer {

@@ -4,9 +4,13 @@ use crate::{
     CodecFormat, EncodeInput, ImageFormat, ImageRgb, Pixfmt, HW_STRIDE_ALIGN,
 };
 use base::message_proto::{EncodedVideoFrame, EncodedVideoFrames, VideoFrame};
-use anyhow::{anyhow, bail, Context, Result as ResultType};
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use hbb_common::{
+    anyhow::{anyhow, bail, Context},
+    bytes::Bytes,
+    log,
+    serde_derive::{Deserialize, Serialize},
+    serde_json, ResultType,
+};
 use hwcodec::{
     common::{
         DataFormat, HwcodecErrno,
@@ -522,7 +526,7 @@ impl HwCodecConfig {
         log::info!("set hwcodec config");
         log::debug!("{config:?}");
         #[cfg(any(windows, target_os = "macos"))]
-        base::config::common_store(
+        hbb_common::config::common_store(
             &HwCodecConfig2 {
                 config: serde_json::to_string_pretty(&config).unwrap_or_default(),
             },
@@ -605,7 +609,7 @@ impl HwCodecConfig {
                 Some(c) => c,
                 None => {
                     log::info!("try load cached hwcodec config");
-                    let c = base::config::common_load::<HwCodecConfig2>("_hwcodec");
+                    let c = hbb_common::config::common_load::<HwCodecConfig2>("_hwcodec");
                     let c: HwCodecConfig = serde_json::from_str(&c.config).unwrap_or_default();
                     let new_signature = hwcodec::common::get_gpu_signature();
                     if c.signature == new_signature {
@@ -718,6 +722,7 @@ pub fn start_check_process() {
     if !enable_hwcodec_option() || HwCodecConfig::already_set() {
         return;
     }
+    use hbb_common::allow_err;
     use std::sync::Once;
     let f = || {
         if let Ok(exe) = std::env::current_exe() {
@@ -733,9 +738,7 @@ pub fn start_check_process() {
                             break;
                         }
                     }
-                    if let Err(err) = child.kill() {
-                        log::debug!("kill hwcodec check process: {:?}", err);
-                    }
+                    allow_err!(child.kill());
                     std::thread::sleep(std::time::Duration::from_millis(30));
                     match child.try_wait() {
                         Ok(Some(status)) => {

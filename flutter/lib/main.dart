@@ -8,7 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/pages/install_page.dart';
+import 'package:flutter_hbb/desktop/pages/server_page.dart';
+import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
+import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_terminal_screen.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
@@ -20,11 +24,10 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'common.dart';
-import 'common/widgets/login_page.dart';
 import 'consts.dart';
 import 'mobile/pages/home_page.dart';
+import 'mobile/pages/server_page.dart';
 import 'mobile/widgets/deploy_dialog.dart';
-import 'models/om_auth.dart';
 import 'models/platform_model.dart';
 
 /// Basic window and launch properties.
@@ -61,15 +64,30 @@ Future<void> main(List<String> args) async {
     switch (kWindowType) {
       case WindowType.RemoteDesktop:
         desktopType = DesktopType.remote;
-        // 连接引擎替换: 会话窗 = SessionHost 外部进程,与 connect() 统一入口同步。
-        final remoteId = (argument['id'] ?? '').toString();
-        await launchSessionHost(remoteId, kind: 'remote', name: remoteId);
+        runMultiWindow(
+          argument,
+          kAppTypeDesktopRemote,
+        );
+        break;
+      case WindowType.FileTransfer:
+        desktopType = DesktopType.fileTransfer;
+        runMultiWindow(
+          argument,
+          kAppTypeDesktopFileTransfer,
+        );
         break;
       case WindowType.ViewCamera:
         desktopType = DesktopType.viewCamera;
         runMultiWindow(
           argument,
           kAppTypeDesktopViewCamera,
+        );
+        break;
+      case WindowType.PortForward:
+        desktopType = DesktopType.portForward;
+        runMultiWindow(
+          argument,
+          kAppTypeDesktopPortForward,
         );
         break;
       case WindowType.Terminal:
@@ -81,6 +99,13 @@ Future<void> main(List<String> args) async {
       default:
         break;
     }
+  } else if (args.isNotEmpty && args.first == '--cm') {
+    debugPrint("--cm started");
+    desktopType = DesktopType.cm;
+    await windowManager.ensureInitialized();
+    runConnectionManagerScreen();
+  } else if (args.contains('--install')) {
+    runInstallPage();
   } else {
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
@@ -88,23 +113,7 @@ Future<void> main(List<String> args) async {
     if (isMacOS) {
       disableWindowMovable(kWindowId);
     }
-    runMainApp();
-  }
-}
-
-bool _isCmReadyToShow = false;
-
-/// 会话管理窗显示(尺寸随聊天开合,见 kConnectionManagerWindowSize*)。
-showCmWindow({bool isStartup = false}) async {
-  if (isStartup) {
-    await windowManager.show();
-    await windowManager.focus();
-    _isCmReadyToShow = true;
-  } else if (_isCmReadyToShow) {
-    if (await windowManager.getOpacity() != 1) {
-      await windowManager.setOpacity(1);
-      await windowManager.focus();
-    }
+    runMainApp(true);
   }
 }
 
@@ -117,18 +126,21 @@ Future<void> initEnv(String appType) async {
   await initGlobalFFI();
   // await Firebase.initializeApp();
   _registerEventHandler();
-  // 恢复记住的登录; 未登录时主界面被 home 登录门挡住。
-  await OmAuth.instance.restore();
   // Update the system theme.
   updateSystemWindowTheme();
 }
 
-void runMainApp() async {
+void runMainApp(bool startService) async {
   // register uni links
   await initEnv(kAppTypeMain);
+  checkUpdate();
   // trigger connection status updater
   await bind.mainCheckConnectStatus();
-  await gFFI.abModel.loadCache();
+  if (startService) {
+    gFFI.serverModel.startService();
+  }
+  await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
+  gFFI.userModel.refreshCurrentUser();
   runApp(App());
 
   bool? alwaysOnTop;
@@ -163,10 +175,12 @@ void runMainApp() async {
 
 void runMobileApp() async {
   await initEnv(kAppTypeMain);
-  // (Android 服务页通道已随连接引擎移除)
+  checkUpdate();
+  if (isAndroid) androidChannelInit();
   if (isAndroid) platformFFI.syncAndroidServiceAppDirConfigPath();
   draggablePositions.load();
-  await gFFI.abModel.loadCache();
+  await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
+  gFFI.userModel.refreshCurrentUser();
   runApp(App());
   await initUniLinks();
 }
@@ -190,9 +204,19 @@ void runMultiWindow(
         params: argument,
       );
       break;
+    case kAppTypeDesktopFileTransfer:
+      widget = DesktopFileTransferScreen(
+        params: argument,
+      );
+      break;
     case kAppTypeDesktopViewCamera:
       draggablePositions.load();
       widget = DesktopViewCameraScreen(
+        params: argument,
+      );
+      break;
+    case kAppTypeDesktopPortForward:
+      widget = DesktopPortForwardScreen(
         params: argument,
       );
       break;
@@ -227,6 +251,10 @@ void runMultiWindow(
         );
       }
       break;
+    case kAppTypeDesktopFileTransfer:
+      await restoreWindowPosition(WindowType.FileTransfer,
+          windowId: kWindowId!);
+      break;
     case kAppTypeDesktopViewCamera:
       // If screen rect is set, the window will be moved to the target screen and then set fullscreen.
       if (argument['screen_rect'] == null) {
@@ -240,6 +268,9 @@ void runMultiWindow(
         );
       }
       break;
+    case kAppTypeDesktopPortForward:
+      await restoreWindowPosition(WindowType.PortForward, windowId: kWindowId!);
+      break;
     case kAppTypeDesktopTerminal:
       await restoreWindowPosition(WindowType.Terminal, windowId: kWindowId!);
       break;
@@ -249,6 +280,74 @@ void runMultiWindow(
   }
   // show window from hidden status
   WindowController.fromWindowId(kWindowId!).show();
+}
+
+void runConnectionManagerScreen() async {
+  await initEnv(kAppTypeConnectionManager);
+  _runApp(
+    '',
+    const DesktopServerPage(),
+    MyTheme.currentThemeMode(),
+  );
+  final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
+  gFFI.serverModel.hideCm = hide;
+  if (hide) {
+    await hideCmWindow(isStartup: true);
+  } else {
+    await showCmWindow(isStartup: true);
+  }
+  setResizable(false);
+  // Start the uni links handler and redirect links to Native, not for Flutter.
+  listenUniLinks(handleByFlutter: false);
+}
+
+bool _isCmReadyToShow = false;
+
+showCmWindow({bool isStartup = false}) async {
+  if (isStartup) {
+    WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
+        size: kConnectionManagerWindowSizeClosedChat, alwaysOnTop: true);
+    await windowManager.waitUntilReadyToShow(windowOptions, null);
+    bind.mainHideDock();
+    await Future.wait([
+      windowManager.show(),
+      windowManager.focus(),
+      windowManager.setOpacity(1)
+    ]);
+    // ensure initial window size to be changed
+    await windowManager.setSizeAlignment(
+        kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+    _isCmReadyToShow = true;
+  } else if (_isCmReadyToShow) {
+    if (await windowManager.getOpacity() != 1) {
+      await windowManager.setOpacity(1);
+      await windowManager.focus();
+      await windowManager.minimize(); //needed
+      await windowManager.setSizeAlignment(
+          kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+      windowOnTop(null);
+    }
+  }
+}
+
+hideCmWindow({bool isStartup = false}) async {
+  if (isStartup) {
+    WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
+        size: kConnectionManagerWindowSizeClosedChat);
+    windowManager.setOpacity(0);
+    await windowManager.waitUntilReadyToShow(windowOptions, null);
+    bind.mainHideDock();
+    await windowManager.minimize();
+    await windowManager.hide();
+    _isCmReadyToShow = true;
+  } else if (_isCmReadyToShow) {
+    if (await windowManager.getOpacity() != 0) {
+      await windowManager.setOpacity(0);
+      bind.mainHideDock();
+      await windowManager.minimize();
+      await windowManager.hide();
+    }
+  }
 }
 
 void _runApp(
@@ -283,6 +382,20 @@ void _runApp(
       },
     ),
   ));
+}
+
+void runInstallPage() async {
+  await windowManager.ensureInitialized();
+  await initEnv(kAppTypeMain);
+  _runApp('', const InstallPage(), MyTheme.currentThemeMode());
+  WindowOptions windowOptions =
+      getHiddenTitleBarWindowOptions(size: Size(800, 600), center: true);
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    windowManager.show();
+    windowManager.focus();
+    windowManager.setOpacity(1);
+    windowManager.setAlignment(Alignment.center); // ensure
+  });
 }
 
 WindowOptions getHiddenTitleBarWindowOptions(
@@ -372,7 +485,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       return MultiProvider(
         providers: [
           // global configuration
-          // use session related FFI when in remote session page
+          // use session related FFI when in remote control or file transfer page
           ChangeNotifierProvider.value(value: gFFI.ffiModel),
           ChangeNotifierProvider.value(value: gFFI.imageModel),
           ChangeNotifierProvider.value(value: gFFI.cursorModel),
@@ -388,14 +501,11 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           theme: MyTheme.lightTheme,
           darkTheme: MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
-          home: Obx(() {
-            if (!OmAuth.instance.isLoggedIn) return const LoginPage();
-            return isDesktop
-                ? const DesktopTabPage()
-                : isWeb
-                    ? WebHomePage()
-                    : HomePage();
-          }),
+          home: isDesktop
+              ? const DesktopTabPage()
+              : isWeb
+                  ? WebHomePage()
+                  : HomePage(),
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,

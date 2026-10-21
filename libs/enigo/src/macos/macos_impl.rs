@@ -430,14 +430,14 @@ impl KeyboardControllable for Enigo {
                     event.set_string(cluster);
                     self.post(event, None);
                 } else {
-                    throttled_log!(
+                    hbb_common::throttled_log!(
                         KEYBOARD_ERROR_LOG_INTERVAL,
                         error,
                         "Failed to inject macOS Enigo key-sequence: could not create keyboard event"
                     );
                 }
             } else {
-                throttled_log!(
+                hbb_common::throttled_log!(
                     KEYBOARD_ERROR_LOG_INTERVAL,
                     error,
                     "Failed to inject macOS Enigo key-sequence: event source is not initialized"
@@ -449,7 +449,7 @@ impl KeyboardControllable for Enigo {
     fn key_click(&mut self, key: Key) {
         let keycode = self.key_to_keycode(key);
         if keycode == u16::MAX {
-            throttled_log!(
+            hbb_common::throttled_log!(
                 KEYBOARD_ERROR_LOG_INTERVAL,
                 error,
                 "Failed to inject macOS Enigo key-click: keycode mapping is unavailable"
@@ -461,7 +461,7 @@ impl KeyboardControllable for Enigo {
             if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), keycode, true) {
                 self.post(event, Some(keycode));
             } else {
-                throttled_log!(
+                hbb_common::throttled_log!(
                     KEYBOARD_ERROR_LOG_INTERVAL,
                     error,
                     "Failed to inject macOS Enigo key-down in key-click: could not create keyboard event"
@@ -471,14 +471,14 @@ impl KeyboardControllable for Enigo {
             if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), keycode, false) {
                 self.post(event, Some(keycode));
             } else {
-                throttled_log!(
+                hbb_common::throttled_log!(
                     KEYBOARD_ERROR_LOG_INTERVAL,
                     error,
                     "Failed to inject macOS Enigo key-up in key-click: could not create keyboard event"
                 );
             }
         } else {
-            throttled_log!(
+            hbb_common::throttled_log!(
                 KEYBOARD_ERROR_LOG_INTERVAL,
                 error,
                 "Failed to inject macOS Enigo key-click: event source is not initialized"
@@ -502,7 +502,7 @@ impl KeyboardControllable for Enigo {
     fn key_up(&mut self, key: Key) {
         let code = self.key_to_keycode(key);
         if code == u16::MAX {
-            throttled_log!(
+            hbb_common::throttled_log!(
                 KEYBOARD_ERROR_LOG_INTERVAL,
                 error,
                 "Cannot map macOS Enigo key-up to a keycode"
@@ -512,14 +512,14 @@ impl KeyboardControllable for Enigo {
             if let Ok(event) = CGEvent::new_keyboard_event(src.clone(), code, false) {
                 self.post(event, Some(code));
             } else {
-                throttled_log!(
+                hbb_common::throttled_log!(
                     KEYBOARD_ERROR_LOG_INTERVAL,
                     error,
                     "Failed to inject macOS Enigo key-up: could not create keyboard event"
                 );
             }
         } else {
-            throttled_log!(
+            hbb_common::throttled_log!(
                 KEYBOARD_ERROR_LOG_INTERVAL,
                 error,
                 "Failed to inject macOS Enigo key-up: event source is not initialized"

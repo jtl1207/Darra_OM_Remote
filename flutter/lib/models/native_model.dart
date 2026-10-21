@@ -173,6 +173,8 @@ class PlatformFFI {
       _startListenEvent(_ffiBind); // global event
       try {
         if (isAndroid) {
+          // Android file transfer uses app-specific storage. User-selected
+          // files enter and leave this workspace through the system picker.
           _homeDir = (await getExternalStorageDirectory())?.path ??
               (await getApplicationSupportDirectory()).path;
         } else if (isIOS) {

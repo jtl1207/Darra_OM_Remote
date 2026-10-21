@@ -86,11 +86,7 @@ fn install_android_deps() {
 }
 
 fn main() {
-    // 版本号取 Cargo.toml（唯一源 RELEASE.txt 由 sync-versions.ps1 扇出），构建日期编译期注入
-    println!(
-        "cargo:rustc-env=BUILD_DATE={}",
-        chrono::Utc::now().format("%Y-%m-%d")
-    );
+    hbb_common::gen_version();
     install_android_deps();
     #[cfg(all(windows, feature = "inline"))]
     build_manifest();

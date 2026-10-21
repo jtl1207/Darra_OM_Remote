@@ -4,6 +4,7 @@ import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/widgets/address_book.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/widgets/my_group.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/common/widgets/peer_card.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -56,7 +57,15 @@ class _PeerTabPageState extends State<PeerTabPage>
         AddressBook(
           menuPadding: _menuPadding(),
         ),
-        ({dynamic hint}) => gFFI.abModel.pullAb(quiet: false)),
+        ({dynamic hint}) => gFFI.abModel.pullAb(
+            force: hint == null ? ForcePullAb.listAndCurrent : null,
+            quiet: false)),
+    _TabEntry(
+      MyGroup(
+        menuPadding: _menuPadding(),
+      ),
+      ({dynamic hint}) => gFFI.groupModel.pull(force: hint == null),
+    ),
   ];
   RelativeRect? mobileTabContextMenuPos;
 
@@ -375,6 +384,9 @@ class _PeerTabPageState extends State<PeerTabPage>
 
   Widget deleteSelection() {
     final model = Provider.of<PeerTabModel>(context);
+    if (model.currentTab == PeerTabIndex.group.index) {
+      return Offstage();
+    }
     return _hoverAction(
         context: context,
         toolTip: translate('Delete'),
@@ -449,7 +461,7 @@ class _PeerTabPageState extends State<PeerTabPage>
       addressbooks.remove(gFFI.abModel.currentName.value);
     }
     return Offstage(
-      offstage: addressbooks.isEmpty,
+      offstage: !gFFI.userModel.isLogin || addressbooks.isEmpty,
       child: _hoverAction(
         context: context,
         toolTip: translate('Add to address book'),
@@ -466,7 +478,8 @@ class _PeerTabPageState extends State<PeerTabPage>
   Widget editSelectionTags() {
     final model = Provider.of<PeerTabModel>(context);
     return Offstage(
-      offstage: model.currentTab != PeerTabIndex.ab.index ||
+      offstage: !gFFI.userModel.isLogin ||
+          model.currentTab != PeerTabIndex.ab.index ||
           gFFI.abModel.currentAbTags.isEmpty,
       child: _hoverAction(
               context: context,
@@ -542,6 +555,8 @@ class _PeerTabPageState extends State<PeerTabPage>
       const PeerSearchBar().marginOnly(right: 13),
       _createRefresh(
           index: PeerTabIndex.ab, loading: gFFI.abModel.currentAbLoading),
+      _createRefresh(
+          index: PeerTabIndex.group, loading: gFFI.groupModel.groupLoading),
       Offstage(
         offstage: model.currentTabCachedPeers.isEmpty,
         child: _createMultiSelection(),
@@ -608,6 +623,9 @@ class _PeerTabPageState extends State<PeerTabPage>
       if (model.currentTab == PeerTabIndex.ab.index)
         _createRefresh(
             index: PeerTabIndex.ab, loading: gFFI.abModel.currentAbLoading),
+      if (model.currentTab == PeerTabIndex.group.index)
+        _createRefresh(
+            index: PeerTabIndex.group, loading: gFFI.groupModel.groupLoading),
     ];
     final List<Widget> dynamicActions = [
       if (model.currentTabCachedPeers.isNotEmpty) _createMultiSelection(),

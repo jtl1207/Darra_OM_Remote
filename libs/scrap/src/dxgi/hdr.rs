@@ -27,6 +27,7 @@
 //! the controller behind an explicit user toggle, negotiated like i444.
 
 use super::ComPtr;
+use hbb_common::log;
 use std::{
     io, mem, ptr,
     sync::{atomic::AtomicBool, OnceLock},

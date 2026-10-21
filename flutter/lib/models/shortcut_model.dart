@@ -4,15 +4,16 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../common.dart';
+import '../common/shared_state.dart' show PrivacyModeState;
 import '../common/widgets/dialog.dart'
     show desktopTryShowTabAuditDialogCloseCancelled;
 import '../common/widgets/keyboard_shortcuts/shortcut_utils.dart';
 import '../common/widgets/keyboard_shortcuts/shortcut_actions.dart';
 import '../common/widgets/toolbar.dart'
-    show showVirtualDisplayMenu;
+    show allowDisplaySwitchInPrivacyMode, showVirtualDisplayMenu;
 import '../consts.dart';
 import '../desktop/widgets/remote_toolbar.dart' show ToolbarState;
-import 'chat_model.dart' show ChatModel, MessageKey;
+import 'chat_model.dart' show ChatModel, MessageKey, VoiceCallStatus;
 import '../desktop/widgets/tabbar_widget.dart' show DesktopTabController;
 import '../models/model.dart';
 import '../models/platform_model.dart';
@@ -199,6 +200,9 @@ class ShortcutModel {
   ///     `recordingModel.toggle()`; Web has no implementation.
   ///   * Reset Canvas: only the mobile toolbar builds the menu entry
   ///     (`isDefaultConn && isMobile` in `toolbarControls`).
+  ///   * Voice Call: iOS has no audio capture implementation; Web bridge throws
+  ///     `UnimplementedError` for both `sessionRequestVoiceCall` and
+  ///     `sessionCloseVoiceCall`.
   static ShortcutPlatformCapabilities currentPlatformCapabilities() {
     final desktopLayout = isDesktop || isWeb;
     return ShortcutPlatformCapabilities(
@@ -214,9 +218,11 @@ class ShortcutModel {
       includeResetCanvasShortcut: isMobile,
       includePinToolbarShortcut: desktopLayout,
       includeViewModeShortcut: true,
+      includeVoiceCallShortcut: !isWeb && !isIOS,
       excludedActions: Set.unmodifiable({
         if (!isDesktop) ...[
           kShortcutActionSwitchDisplayAll,
+          kShortcutActionToggleEnableFileCopyPaste,
         ],
         if (isMobile) ...[
           kShortcutActionKeyboardModeLegacy,
@@ -347,6 +353,11 @@ void registerSessionShortcutActions(
   // view via these shortcuts.
   void switchDisplayBy(int delta) {
     final pi = ffi.ffiModel.pi;
+    final privacyMode = PrivacyModeState.find(ffi.id).value;
+    if (privacyMode.isNotEmpty &&
+        !allowDisplaySwitchInPrivacyMode(pi, privacyMode)) {
+      return;
+    }
     final count = pi.displays.length;
     if (count <= 1) return;
     final current = pi.currentDisplay;
@@ -381,6 +392,11 @@ void registerSessionShortcutActions(
   // view never engages.
   ffi.shortcutModel.register(kShortcutActionSwitchDisplayAll, () {
     final pi = ffi.ffiModel.pi;
+    final privacyMode = PrivacyModeState.find(ffi.id).value;
+    if (privacyMode.isNotEmpty &&
+        !allowDisplaySwitchInPrivacyMode(pi, privacyMode)) {
+      return;
+    }
     if (!pi.isSupportMultiDisplay || pi.displays.length <= 1) return;
     if (pi.currentDisplay == kAllDisplayValue) return;
     openDisplay(kAllDisplayValue, pi);
@@ -441,9 +457,25 @@ void registerSessionShortcutActions(
     ffi.chatModel.toggleChatOverlay();
   });
 
+  // Toggle Voice Call — start when idle, hang up when active. Mirrors the
+  // toolbar's `_VoiceCallMenu` state-driven button. Web bridge throws
+  // UnimplementedError on both sessionRequestVoiceCall and
+  // sessionCloseVoiceCall; iOS has no audio capture implementation.
+  if (!isWeb && !isIOS) {
+    ffi.shortcutModel.register(kShortcutActionToggleVoiceCall, () {
+      final status = ffi.chatModel.voiceCallStatus.value;
+      if (status == VoiceCallStatus.connected ||
+          status == VoiceCallStatus.waitingForResponse) {
+        bind.sessionCloseVoiceCall(sessionId: sessionId);
+      } else {
+        bind.sessionRequestVoiceCall(sessionId: sessionId);
+      }
+    });
+  }
+
   // ── Inline _KeyboardMenu items + actions with no toolbar TToggleMenu/TRadioMenu ─
   // The toolbar's TToggleMenu / TRadioMenu helpers (toolbarDisplayToggle,
-  // toolbarCursor, toolbarKeyboardToggles, toolbarCodec,
+  // toolbarCursor, toolbarKeyboardToggles, toolbarCodec, toolbarPrivacyMode,
   // toolbarViewStyle, toolbarImageQuality) auto-register their tagged entries
   // from the bottom of each helper. The handlers below cover what those
   // helpers DON'T own:
@@ -512,6 +544,7 @@ void registerSessionShortcutActions(
   ffi.shortcutModel.register(kShortcutActionPlugOutAllVirtualDisplays, () {
     if (ffi.connType != ConnType.defaultConn ||
         !showVirtualDisplayMenu(ffi) ||
+        PrivacyModeState.find(ffi.id).value.isNotEmpty ||
         (ffi.ffiModel.pi.isAmyuniIdd &&
             ffi.ffiModel.pi.amyuniVirtualDisplayCount == 0)) {
       return;
@@ -520,6 +553,81 @@ void registerSessionShortcutActions(
       sessionId: sessionId,
       index: kAllVirtualDisplay,
       on: false,
+    );
+  });
+
+  // Privacy mode 1 / 2 — fallback handlers for the single-impl and null-impls
+  // branches of `toolbarPrivacyMode`. The multi-impl branch tags each entry
+  // with the matching actionId and `_registerToggleMenuShortcuts` overrides
+  // these closures with the toolbar's own onChanged. But when the peer only
+  // advertises a single impl (older Linux peers, certain platform configs)
+  // toolbarPrivacyMode returns a `getDefaultMenu` entry without an actionId,
+  // so the auto-register pass skips it — these fallbacks are what actually
+  // wire the shortcut in that case.
+  String? findPrivacyImpl(String nameKey) {
+    final impls = ffi.ffiModel.pi
+            .platformAdditions[kPlatformAdditionsSupportedPrivacyModeImpl]
+        as List<dynamic>?;
+    if (impls == null) return null;
+    for (final e in impls) {
+      if (e is List && e.length >= 2 && e[1] == nameKey) return e[0] as String;
+    }
+    return null;
+  }
+
+  bool checkPrivacyModeAllowed(String implKey) {
+    final ffiModel = ffi.ffiModel;
+    final pi = ffiModel.pi;
+    final privacyMode = PrivacyModeState.find(ffi.id).value;
+    if (ffi.connType != ConnType.defaultConn ||
+        ffiModel.viewOnly ||
+        (privacyMode.isEmpty &&
+            (!pi.features.privacyMode || !ffiModel.keyboard))) {
+      return false;
+    }
+    if (privacyMode == implKey) return true;
+    if (ffiModel.permissions['privacy_mode'] == false) return false;
+    if (allowDisplaySwitchInPrivacyMode(pi, implKey) ||
+        (pi.currentDisplay == 0 &&
+            !bind.sessionIsMultiUiSession(sessionId: sessionId))) {
+      return true;
+    }
+    msgBox(sessionId, 'custom-nook-nocancel-hasclose', 'info',
+        'Please switch to Display 1 first', '', ffi.dialogManager);
+    return false;
+  }
+
+  // Match the multi-impl branch of `toolbarPrivacyMode`: turn this impl on iff
+  // the active impl isn't already this one. Comparing `.value == implKey`
+  // (rather than `.value.isEmpty`) means pressing the mode-1 shortcut while
+  // mode 2 is on correctly turns mode 1 ON, instead of misreading the
+  // "any-mode-active" state as "this-mode-active" and toggling OFF.
+  ffi.shortcutModel.register(kShortcutActionPrivacyMode1, () {
+    if (ffi.ffiModel.pi
+            .platformAdditions[kPlatformAdditionsSupportedPrivacyModeImpl] ==
+        null) {
+      // Older peers use the legacy option instead of a named implementation.
+      if (!checkPrivacyModeAllowed(kPrivacyModeImplMag)) return;
+      bind.sessionToggleOption(sessionId: sessionId, value: 'privacy-mode');
+      return;
+    }
+    final implKey = findPrivacyImpl('privacy_mode_impl_mag_tip');
+    if (implKey == null) return;
+    if (!checkPrivacyModeAllowed(implKey)) return;
+    bind.sessionTogglePrivacyMode(
+      sessionId: sessionId,
+      implKey: implKey,
+      on: PrivacyModeState.find(ffi.id).value != implKey,
+    );
+  });
+  ffi.shortcutModel.register(kShortcutActionPrivacyMode2, () {
+    final implKey = findPrivacyImpl('privacy_mode_impl_virtual_display_tip');
+    if (implKey == null) return;
+    if (!checkPrivacyModeAllowed(implKey)) return;
+    bind.sessionTogglePrivacyMode(
+      sessionId: sessionId,
+      implKey: implKey,
+      on: PrivacyModeState.find(ffi.id).value != implKey,
     );
   });
 

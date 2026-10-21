@@ -1,40 +1,9 @@
-//! 应用共享的选项键(唯一定义处,调用方统一走 base::config::keys)。
+//! Option keys shared across the app.
+//!
+//! The handful that `hbb_common` itself reads stay defined there and are
+//! re-exported here, so callers always use this one path.
 
-// 原 hbb_common::config::keys 迁入,键名与取值保持不变。
-pub const OPTION_COLLAPSE_TOOLBAR: &str = "collapse_toolbar";
-pub const OPTION_ZOOM_CURSOR: &str = "zoom-cursor";
-pub const OPTION_ENABLE_FILE_COPY_PASTE: &str = "enable-file-copy-paste";
-pub const OPTION_I444: &str = "i444";
-pub const OPTION_REVERSE_MOUSE_WHEEL: &str = "reverse_mouse_wheel";
-pub const OPTION_SWAP_LEFT_RIGHT_MOUSE: &str = "swap-left-right-mouse";
-pub const OPTION_DISPLAYS_AS_INDIVIDUAL_WINDOWS: &str = "displays_as_individual_windows";
-pub const OPTION_USE_ALL_MY_DISPLAYS_FOR_THE_REMOTE_SESSION: &str =
-    "use_all_my_displays_for_the_remote_session";
-pub const OPTION_VIEW_STYLE: &str = "view_style";
-pub const OPTION_SCROLL_STYLE: &str = "scroll_style";
-pub const OPTION_EDGE_SCROLL_EDGE_THICKNESS: &str = "edge-scroll-edge-thickness";
-pub const OPTION_IMAGE_QUALITY: &str = "image_quality";
-pub const OPTION_CUSTOM_IMAGE_QUALITY: &str = "custom_image_quality";
-pub const OPTION_CUSTOM_FPS: &str = "custom-fps";
-pub const OPTION_CODEC_PREFERENCE: &str = "codec-preference";
-pub const OPTION_LANGUAGE: &str = "lang";
-pub const OPTION_ALLOW_NUMERNIC_ONE_TIME_PASSWORD: &str = "allow-numeric-one-time-password";
-pub const OPTION_DIRECT_SERVER: &str = "direct-server";
-pub const OPTION_ALLOW_WEBSOCKET: &str = "allow-websocket";
-pub const OPTION_TRACKPAD_SPEED: &str = "trackpad-speed";
-pub const OPTION_REGISTER_DEVICE: &str = "register-device";
-pub const OPTION_RELAY_SERVER: &str = "relay-server";
-pub const OPTION_ICE_SERVERS: &str = "ice-servers";
-pub const OPTION_ALLOW_INSECURE_TLS_FALLBACK: &str = "allow-insecure-tls-fallback";
-pub const OPTION_ALLOW_WEBRTC_CC: &str = "allow-webrtc-congestion-control";
-pub const OPTION_ALLOW_HOSTNAME_AS_ID: &str = "allow-hostname-as-id";
-pub const OPTION_DISABLE_CHANGE_PERMANENT_PASSWORD: &str = "disable-change-permanent-password";
-pub const OPTION_DISABLE_CHANGE_ID: &str = "disable-change-id";
-pub const OPTION_DISABLE_UNLOCK_PIN: &str = "disable-unlock-pin";
-// 代理设置:下列键并非真实键名,仅用于自定义客户端高级设置;真实键在 Config2::socks。
-pub const OPTION_PROXY_URL: &str = "proxy-url";
-pub const OPTION_PROXY_USERNAME: &str = "proxy-username";
-pub const OPTION_PROXY_PASSWORD: &str = "proxy-password";
+pub use hbb_common::config::keys::*;
 
 pub const OPTION_VIEW_ONLY: &str = "view_only";
 pub const OPTION_SHOW_MONITORS_TOOLBAR: &str = "show_monitors_toolbar";
@@ -104,6 +73,7 @@ pub const OPTION_ENABLE_HWCODEC: &str = "enable-hwcodec";
 pub const OPTION_APPROVE_MODE: &str = "approve-mode";
 pub const OPTION_VERIFICATION_METHOD: &str = "verification-method";
 pub const OPTION_TEMPORARY_PASSWORD_LENGTH: &str = "temporary-password-length";
+pub const OPTION_CUSTOM_RENDEZVOUS_SERVER: &str = "custom-rendezvous-server";
 pub const OPTION_API_SERVER: &str = "api-server";
 pub const OPTION_KEY: &str = "key";
 pub const OPTION_PRESET_ADDRESS_BOOK_NAME: &str = "preset-address-book-name";
@@ -337,6 +307,7 @@ pub const KEYS_SETTINGS: &[&str] = &[
     OPTION_PROXY_URL,
     OPTION_PROXY_USERNAME,
     OPTION_PROXY_PASSWORD,
+    OPTION_CUSTOM_RENDEZVOUS_SERVER,
     OPTION_API_SERVER,
     OPTION_KEY,
     OPTION_ALLOW_WEBSOCKET,
@@ -400,3 +371,38 @@ pub const KEYS_BUILDIN_SETTINGS: &[&str] = &[
     OPTION_HIDE_ELEVATE_BUTTON_IN_ACCEPT_WINDOW,
     OPTION_ALLOW_COMMAND_LINE_SETTINGS_WHEN_SETTINGS_DISABLED,
 ];
+
+#[cfg(test)]
+mod tests {
+    /// The glob above and the constants below share one namespace, and Rust
+    /// silently prefers the explicit item over a glob import. A key defined on
+    /// both sides would therefore compile, with the client and the server
+    /// disagreeing about its string value and nothing to signal it. Keep the
+    /// two sets apart.
+    #[test]
+    fn key_names_do_not_collide_with_hbb_common() {
+        fn names(src: &str) -> Vec<&str> {
+            src.lines()
+                .filter_map(|l| l.trim().strip_prefix("pub const "))
+                .filter_map(|l| l.split(':').next())
+                .map(str::trim)
+                .filter(|n| n.starts_with("OPTION_") || n.starts_with("KEYS_"))
+                .collect()
+        }
+
+        let here = names(include_str!("keys.rs"));
+        let there = names(include_str!("../../../hbb_common/src/config.rs"));
+        assert!(
+            !here.is_empty() && !there.is_empty(),
+            "key parsing found nothing"
+        );
+
+        let both: Vec<_> = here.iter().filter(|n| there.contains(n)).collect();
+        assert!(
+            both.is_empty(),
+            "defined in both crates, so the local one shadows hbb_common's \
+             with no diagnostic: {:?}",
+            both
+        );
+    }
+}

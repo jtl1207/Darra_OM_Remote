@@ -10,7 +10,7 @@ pub fn dispatch_wayland_display_probe() {
         wayland_display_probe_child_main();
     }
 }
-use base::{
+use hbb_common::{
     allow_err,
     anyhow::anyhow,
     bail,
@@ -35,6 +35,7 @@ use std::{
 use terminfo::{capability as cap, Database};
 use wallpaper;
 
+pub const PA_SAMPLE_RATE: u32 = 48000;
 static mut UNMODIFIED: bool = true;
 
 #[derive(Clone, Debug)]
@@ -289,7 +290,7 @@ thread_local! {
 }
 
 pub fn right_alt_is_level3_shift() -> ResultType<bool> {
-    use base::x11::{keysym, xlib};
+    use hbb_common::x11::{keysym, xlib};
     const XKB_USE_CORE_KBD: c_uint = 0x0100;
     // A fresh connection avoids Xlib's stale keymap cache after a layout switch.
     // This query runs only for a matched chord with physical Right Alt held.
@@ -575,6 +576,30 @@ pub fn get_focused_display(displays: Vec<DisplayInfo>) -> Option<usize> {
 }
 
 pub fn get_cursor() -> ResultType<Option<u64>> {
+    // DRM/KMS capture: the hardware cursor arrives over the `_drm` stream, not from XFixes.
+    //
+    // The MEMOISED `is_x11()` here, deliberately, unlike the capture-path callers that take the
+    // unmemoised `scrap::is_x11()` because this one latches on first use. The tradeoff is the other
+    // way round at cursor cadence: the unmemoised form forks `loginctl` per call, and this runs on
+    // every cursor poll. A latch that guessed wrong costs a cursor served by the wrong source until
+    // the process restarts, not a capture that cannot start -- and by the time a cursor is being
+    // polled there is a live session, which is the case the latch reads correctly.
+    #[cfg(feature = "drm")]
+    if !is_x11() {
+        if let Some(id) = crate::server::drm_capturer::drm_cursor_id() {
+            // In a mixed DRM + PipeWire session the DRM streams only cover the DRM-backed displays;
+            // when the pointer sits on a PipeWire-served display every DRM stream reports the hidden
+            // sentinel. Returning that sentinel here would hide the cursor globally, including on the
+            // PipeWire display where it is still visible, so only report a hidden DRM cursor when it
+            // is authoritative -- a pure-DRM session. A visible DRM cursor is always authoritative;
+            // otherwise fall through to the normal cursor path.
+            if id != scrap::drm_reader::HIDDEN_CURSOR_ID
+                || !crate::server::display_service::has_non_drm_backed_display()
+            {
+                return Ok(Some(id));
+            }
+        }
+    }
     let mut res = None;
     DISPLAY.with(|conn| {
         if let Ok(d) = conn.try_borrow_mut() {
@@ -593,6 +618,32 @@ pub fn get_cursor() -> ResultType<Option<u64>> {
 }
 
 pub fn get_cursor_data(hcursor: u64) -> ResultType<CursorData> {
+    // DRM/KMS capture: return the latest hardware-cursor snapshot from the `_drm` stream. Its id may
+    // have advanced past `hcursor` between get_cursor() and here, so return the latest rather than
+    // bailing (which would trigger a MouseCursorService backoff).
+    //
+    // Memoised `is_x11()` on purpose, for the reason spelled out in `get_cursor()`; the two must
+    // agree anyway, since a caller that took the DRM branch there has to take it here.
+    #[cfg(feature = "drm")]
+    if !is_x11() {
+        if let Some(c) = crate::server::drm_capturer::drm_cursor() {
+            // See get_cursor(): a hidden DRM sentinel is authoritative only in a pure-DRM session. In
+            // a mixed DRM + PipeWire session fall through so the PipeWire display's cursor is served
+            // by the normal path instead of being hidden everywhere.
+            if c.id != scrap::drm_reader::HIDDEN_CURSOR_ID
+                || !crate::server::display_service::has_non_drm_backed_display()
+            {
+                let mut cd: CursorData = Default::default();
+                cd.id = c.id;
+                cd.width = c.width;
+                cd.height = c.height;
+                cd.hotx = c.hotx;
+                cd.hoty = c.hoty;
+                cd.colors = c.colors.into();
+                return Ok(cd);
+            }
+        }
+    }
     let mut res = None;
     DISPLAY.with(|conn| {
         if let Ok(ref mut d) = conn.try_borrow_mut() {
@@ -643,6 +694,19 @@ pub fn get_cursor_data(hcursor: u64) -> ResultType<CursorData> {
         Some(x) => Ok(x),
         _ => bail!("Failed to get cursor image of {}", hcursor),
     }
+}
+
+fn start_uinput_service() {
+    use crate::server::uinput::service;
+    std::thread::spawn(|| {
+        service::start_service_control();
+    });
+    std::thread::spawn(|| {
+        service::start_service_keyboard();
+    });
+    std::thread::spawn(|| {
+        service::start_service_mouse();
+    });
 }
 
 /// Suggests the best terminal type based on the environment.
@@ -827,6 +891,43 @@ fn get_all_term_values(uid: &str) -> Vec<String> {
     terms
 }
 
+fn append_audio_latency_envs(
+    envs: &mut Vec<(&'static str, String)>,
+    get_var: impl Fn(&str) -> Option<String>,
+) {
+    for key in ["PULSE_LATENCY_MSEC", "PIPEWIRE_LATENCY"] {
+        if let Some(value) = get_var(key).filter(|value| !value.is_empty()) {
+            envs.push((key, value));
+        }
+    }
+}
+
+#[cfg(test)]
+mod audio_latency_env_tests {
+    use super::append_audio_latency_envs;
+
+    #[test]
+    fn forwards_configured_values_without_creating_defaults() {
+        let mut envs = Vec::new();
+        append_audio_latency_envs(&mut envs, |key| match key {
+            "PULSE_LATENCY_MSEC" => Some("60".to_owned()),
+            "PIPEWIRE_LATENCY" => Some("1024/48000".to_owned()),
+            _ => None,
+        });
+        assert_eq!(
+            envs,
+            vec![
+                ("PULSE_LATENCY_MSEC", "60".to_owned()),
+                ("PIPEWIRE_LATENCY", "1024/48000".to_owned()),
+            ]
+        );
+
+        envs.clear();
+        append_audio_latency_envs(&mut envs, |_| None);
+        assert!(envs.is_empty());
+    }
+}
+
 #[inline]
 fn try_start_server_(desktop: Option<&Desktop>) -> ResultType<Option<Child>> {
     match desktop {
@@ -857,6 +958,8 @@ fn try_start_server_(desktop: Option<&Desktop>) -> ResultType<Option<Child>> {
                     ));
                 }
             }
+
+            append_audio_latency_envs(&mut envs, |key| std::env::var(key).ok());
 
             envs.push((
                 "TERM",
@@ -954,9 +1057,11 @@ fn should_start_server(
     is_display_changed: bool,
     uid: &mut String,
     desktop: &Desktop,
+    cm0: &mut bool,
     last_restart: &mut Instant,
     server: &mut Option<Child>,
 ) -> bool {
+    let cm = get_cm();
     let mut start_new = false;
     let mut should_kill = false;
 
@@ -968,9 +1073,20 @@ fn should_start_server(
         should_kill = true;
     }
 
-    if !should_kill && last_restart.elapsed().as_secs() > 3600 {
-        // 每隔一小时重启一次 server，规避 SpotUdp（dns 解析）
-        // 和 x server 取 displays 失败的问题。
+    if !should_kill
+        && !cm
+        && ((*cm0 && last_restart.elapsed().as_secs() > 60)
+            || last_restart.elapsed().as_secs() > 3600)
+    {
+        let terminal_session_count = crate::ipc::get_terminal_session_count().unwrap_or(0);
+        if terminal_session_count > 0 {
+            // There are terminal sessions, so we don't restart the server.
+            // We also need to keep `cm0` unchanged, so that we can reach this branch the next time.
+            return false;
+        }
+        // restart server if new connections all closed, or every one hour,
+        // as a workaround to resolve "SpotUdp" (dns resolve)
+        // and x server get displays failure issue
         should_kill = true;
         log::info!("restart server");
     }
@@ -994,6 +1110,7 @@ fn should_start_server(
     } else {
         start_new = true;
     }
+    *cm0 = cm;
     start_new
 }
 
@@ -1007,6 +1124,34 @@ fn force_stop_server() {
 pub fn start_os_service() {
     check_if_stop_service();
     stop_rustdesk_servers();
+    start_uinput_service();
+
+    std::thread::spawn(|| {
+        allow_err!(crate::ipc::start(crate::POSTFIX_SERVICE));
+    });
+
+    // DRM/KMS capture producer (opt-in `drm` feature): a dedicated thread + runtime that streams
+    // scanout frames to the user `--server` over the `_drm` service-scoped channel. Runs here
+    // because this process is the root service that already holds CAP_SYS_ADMIN for the in-process
+    // (direct-mode) libdrmtap read.
+    //
+    // Builder, like every other thread this feature starts: `thread::spawn` PANICS if the thread
+    // cannot be created (EAGAIN under a thread-count or memory limit), and here that panic would
+    // unwind out of `start_os_service` -- taking down the root service itself, for a feature whose
+    // failure should only cost DRM capture. Losing the producer leaves the consumer to fall back to
+    // PipeWire/X11, which is the same path a host without the feature takes.
+    #[cfg(feature = "drm")]
+    if let Err(err) = std::thread::Builder::new()
+        .name("drm-producer".into())
+        .spawn(|| {
+            crate::ipc::start_drm();
+        })
+    {
+        log::warn!(
+            "failed to spawn the drm capture producer thread: {err}; DRM capture is off for \
+             this boot and the consumer falls back to PipeWire/X11"
+        );
+    }
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -1022,6 +1167,7 @@ pub fn start_os_service() {
         println!("Failed to set Ctrl-C handler: {}", err);
     }
 
+    let mut cm0 = false;
     let mut last_restart = Instant::now();
     while running.load(Ordering::SeqCst) {
         desktop.refresh();
@@ -1038,6 +1184,7 @@ pub fn start_os_service() {
                 false,
                 &mut uid,
                 &desktop,
+                &mut cm0,
                 &mut last_restart,
                 &mut server,
             ) {
@@ -1089,6 +1236,7 @@ pub fn start_os_service() {
                 is_display_changed,
                 &mut uid,
                 &desktop,
+                &mut cm0,
                 &mut last_restart,
                 &mut user_server,
             ) {
@@ -1159,6 +1307,18 @@ pub fn get_active_userid_fresh() -> String {
 /// caller to treat as "active session momentarily unknown" rather than stalling on a subprocess.
 pub fn get_active_userid_cached() -> Option<u32> {
     get_active_user_id_name_from_cache().and_then(|(uid, _)| uid.parse::<u32>().ok())
+}
+
+fn get_cm() -> bool {
+    // Runs twice a second in the service loop, so walk /proc rather than forking `ps aux`; that
+    // fork is also what the `CMD_PS` audit-message workaround this replaces was for.
+    let cm = format!(
+        "{} --cm",
+        std::env::current_exe()
+            .unwrap_or_default()
+            .to_string_lossy()
+    );
+    any_process(None, "cmdline", |cmdline| cmdline.contains(&cm))
 }
 
 pub fn is_login_wayland() -> bool {
@@ -1372,6 +1532,63 @@ where
         let task = sudo.spawn()?;
         Ok(Some(task))
     }
+}
+
+pub fn get_pa_monitor() -> String {
+    get_pa_sources()
+        .drain(..)
+        .map(|x| x.0)
+        .filter(|x| x.contains("monitor"))
+        .next()
+        .unwrap_or("".to_owned())
+}
+
+pub fn get_pa_source_name(desc: &str) -> String {
+    get_pa_sources()
+        .drain(..)
+        .filter(|x| x.1 == desc)
+        .map(|x| x.0)
+        .next()
+        .unwrap_or("".to_owned())
+}
+
+pub fn get_pa_sources() -> Vec<(String, String)> {
+    use pulsectl::controllers::*;
+    let mut out = Vec::new();
+    match SourceController::create() {
+        Ok(mut handler) => {
+            if let Ok(devices) = handler.list_devices() {
+                for dev in devices.clone() {
+                    out.push((
+                        dev.name.unwrap_or("".to_owned()),
+                        dev.description.unwrap_or("".to_owned()),
+                    ));
+                }
+            }
+        }
+        Err(err) => {
+            log::error!("Failed to get_pa_sources: {:?}", err);
+        }
+    }
+    out
+}
+
+pub fn get_default_pa_source() -> Option<(String, String)> {
+    use pulsectl::controllers::*;
+    match SourceController::create() {
+        Ok(mut handler) => {
+            if let Ok(dev) = handler.get_default_device() {
+                return Some((
+                    dev.name.unwrap_or("".to_owned()),
+                    dev.description.unwrap_or("".to_owned()),
+                ));
+            }
+        }
+        Err(err) => {
+            log::error!("Failed to get_pa_source: {:?}", err);
+        }
+    }
+    None
 }
 
 pub fn lock_screen() {
@@ -1658,7 +1875,7 @@ pub fn elevate(args: Vec<&str>) -> ResultType<bool> {
             Ok(res)
         }
         None => {
-            base::bail!("Failed to get current exe as str");
+            hbb_common::bail!("Failed to get current exe as str");
         }
     }
 }
@@ -2017,7 +2234,7 @@ mod desktop {
                 // left in place: a non-empty display here suppresses every fallback below, both
                 // `get_display_by_user` and the `:0` default, so anything not local must not pass.
                 let display = Self::get_display_from_session(&self.sid)
-                    .replace(&base::whoami::hostname(), "");
+                    .replace(&hbb_common::whoami::hostname(), "");
                 if display.strip_prefix(':').map_or(false, |number| {
                     number.starts_with(|c: char| c.is_ascii_digit())
                 }) {
@@ -2032,7 +2249,7 @@ mod desktop {
             }
             self.display = self
                 .display
-                .replace(&base::whoami::hostname(), "")
+                .replace(&hbb_common::whoami::hostname(), "")
                 .replace("localhost", "");
         }
 

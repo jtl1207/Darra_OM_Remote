@@ -8,7 +8,7 @@ pub mod macos;
 pub mod windows;
 
 #[cfg(not(debug_assertions))]
-use crate::config::Config;
+use hbb_common::{config::Config, log};
 #[cfg(not(debug_assertions))]
 use std::process::exit;
 

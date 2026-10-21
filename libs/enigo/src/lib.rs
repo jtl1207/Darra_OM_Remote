@@ -53,27 +53,6 @@
 //! ```
 #![deny(missing_docs)]
 
-// 限频日志:同一调用点每个 interval 至多输出一条,并附带被抑制条数(原 hbb_common::throttled_log 语义迁入)。
-macro_rules! throttled_log {
-    ($interval:expr, $level:ident, $($arg:tt)+) => {{
-        static THROTTLE: std::sync::Mutex<(Option<std::time::Instant>, u64)> =
-            std::sync::Mutex::new((None, 0));
-        let mut state = THROTTLE.lock().unwrap_or_else(|p| p.into_inner());
-        state.1 += 1;
-        let due = state.0.map_or(true, |last: std::time::Instant| last.elapsed() >= $interval);
-        if due {
-            let n = std::mem::replace(&mut state.1, 0);
-            state.0 = Some(std::time::Instant::now());
-            drop(state);
-            if n > 1 {
-                log::$level!("{} (x{})", format_args!($($arg)+), n);
-            } else {
-                log::$level!("{}", format_args!($($arg)+));
-            }
-        }
-    }};
-}
-
 #[cfg(target_os = "macos")]
 #[macro_use]
 extern crate objc;

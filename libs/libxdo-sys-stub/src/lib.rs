@@ -4,11 +4,14 @@
 //! allowing the program to run on systems without libxdo installed
 //! (e.g., Wayland-only environments).
 
-use libc::{c_char, c_int, c_uint};
-use libloading::{Library, Symbol};
+use hbb_common::{
+    libc::{c_char, c_int, c_uint},
+    libloading::{Library, Symbol},
+    log,
+};
 use std::sync::OnceLock;
 
-pub use x11::xlib::{Display, Screen, Window};
+pub use hbb_common::x11::xlib::{Display, Screen, Window};
 
 #[repr(C)]
 pub struct xdo_t {

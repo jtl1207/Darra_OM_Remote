@@ -29,9 +29,9 @@ use base::message_proto::CursorData;
     not(all(target_os = "windows", not(target_pointer_width = "64"))),
     not(any(target_os = "android", target_os = "ios"))
 ))]
-use base::sysinfo::System;
+use hbb_common::sysinfo::System;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use base::{sysinfo::Pid, ResultType};
+use hbb_common::{sysinfo::Pid, ResultType};
 use std::sync::{Arc, Mutex};
 
 // Restrict names because installers interpolate them into privileged scripts and paths.
@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 fn validate_install_app_name(app_name: &str) -> ResultType<()> {
     let mut bytes = app_name.bytes();
     let Some(first) = bytes.next() else {
-        base::bail!("Application name must not be empty.");
+        hbb_common::bail!("Application name must not be empty.");
     };
     // Keep leading hyphens valid on Windows for existing custom clients. macOS
     // rejects them because pgrep interprets a leading hyphen as an option.
@@ -53,7 +53,7 @@ fn validate_install_app_name(app_name: &str) -> ResultType<()> {
         } else {
             "a letter, number, or underscore"
         };
-        base::bail!(
+        hbb_common::bail!(
             "Application name must start with {valid_prefix} and contain only letters, numbers, hyphens, and underscores."
         );
     }
@@ -62,9 +62,6 @@ fn validate_install_app_name(app_name: &str) -> ResultType<()> {
 
 #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "ios")))]
 pub const SERVICE_INTERVAL: u64 = 300;
-
-/// 进程崩溃收口回调(Release 注册): 键码重映射随输入服务移除,无本地按键需释放。
-pub fn breakdown_callback() {}
 
 lazy_static::lazy_static! {
     static ref INSTALLING_SERVICE: Arc<Mutex<bool>>= Default::default();
@@ -85,6 +82,13 @@ pub fn is_xfce() -> bool {
     }
 }
 
+pub fn breakdown_callback() {
+    #[cfg(target_os = "linux")]
+    crate::input_service::clear_remapped_keycode();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    crate::input_service::release_device_modifiers();
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn change_resolution(name: &str, width: usize, height: usize) -> ResultType<()> {
     let cur_resolution = current_resolution(name)?;
@@ -98,7 +102,7 @@ pub fn change_resolution(name: &str, width: usize, height: usize) -> ResultType<
     if cur_resolution.width as usize == width && cur_resolution.height as usize == height {
         return Ok(());
     }
-    base::log::warn!("Change resolution of '{}' to ({},{})", name, width, height);
+    hbb_common::log::warn!("Change resolution of '{}' to ({},{})", name, width, height);
     change_resolution_directly(name, width, height)
 }
 
@@ -108,6 +112,9 @@ pub fn get_active_username() -> String {
     // TODO
     "android".into()
 }
+
+#[cfg(target_os = "android")]
+pub const PA_SAMPLE_RATE: u32 = 48000;
 
 #[cfg(target_os = "android")]
 #[derive(Default)]
@@ -120,7 +127,7 @@ impl WakeLock {
         match android_wakelock::partial(tag) {
             Ok(lock) => Self(Some(lock)),
             Err(e) => {
-                base::log::error!("Failed to get wakelock: {e:?}");
+                hbb_common::log::error!("Failed to get wakelock: {e:?}");
                 Self::default()
             }
         }
@@ -129,7 +136,7 @@ impl WakeLock {
 
 #[cfg(not(target_os = "ios"))]
 pub fn get_wakelock(_display: bool) -> WakeLock {
-    base::log::info!("new wakelock, require display on: {_display}");
+    hbb_common::log::info!("new wakelock, require display on: {_display}");
     #[cfg(target_os = "android")]
     return crate::platform::WakeLock::new("server");
     // display: keep screen on
@@ -161,6 +168,41 @@ impl Drop for InstallingService {
 #[inline]
 pub fn is_prelogin() -> bool {
     false
+}
+
+// Note: This method is inefficient on Windows. It will get all the processes.
+// It should only be called when performance is not critical.
+// If we wanted to get the command line ourselves, there would be a lot of new code.
+#[allow(dead_code)]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn get_pids_of_process_with_args<S1: AsRef<str>, S2: AsRef<str>>(
+    name: S1,
+    args: &[S2],
+) -> Vec<Pid> {
+    // This function does not work when the process is 32-bit and the OS is 64-bit Windows,
+    // `process.cmd()` always returns [] in this case.
+    // So we use `windows::get_pids_with_args_by_wmic()` instead.
+    #[cfg(all(target_os = "windows", not(target_pointer_width = "64")))]
+    {
+        return windows::get_pids_with_args_by_wmic(name, args);
+    }
+    #[cfg(not(all(target_os = "windows", not(target_pointer_width = "64"))))]
+    {
+        let name = name.as_ref().to_lowercase();
+        let system = System::new_all();
+        system
+            .processes()
+            .iter()
+            .filter(|(_, process)| {
+                process.name().to_lowercase() == name
+                    && process.cmd().len() == args.len() + 1
+                    && args.iter().enumerate().all(|(i, arg)| {
+                        process.cmd()[i + 1].to_lowercase() == arg.as_ref().to_lowercase()
+                    })
+            })
+            .map(|(&pid, _)| pid)
+            .collect()
+    }
 }
 
 // Note: This method is inefficient on Windows. It will get all the processes.

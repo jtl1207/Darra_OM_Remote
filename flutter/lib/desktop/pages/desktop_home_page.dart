@@ -2,16 +2,24 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
+import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
-import 'package:flutter_hbb/common/widgets/peer_tab_page.dart';
+import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
+import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/models/server_model.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
 import 'package:get/get.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
@@ -82,8 +90,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: loadLogo(),
       ),
       buildTip(context),
+      if (!isOutgoingOnly) buildIDBoard(context),
+      if (!isOutgoingOnly) buildPasswordBoard(context),
       FutureBuilder<Widget>(
-        future: Future.value(buildHelpCards()),
+        future: Future.value(
+            Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
         builder: (_, data) {
           if (data.hasData) {
             if (isIncomingOnly) {
@@ -100,8 +111,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         },
       ),
     ];
+    if (isIncomingOnly) {
+      children.addAll([
+        Divider(),
+        OnlineStatusWidget(
+          onSvcStatusChanged: () {
+            if (isInHomePage()) {
+              Future.delayed(Duration(milliseconds: 300), () {
+                _updateWindowSize();
+              });
+            }
+          },
+        ).marginOnly(bottom: 6, right: 6)
+      ]);
+    }
     final textColor = Theme.of(context).textTheme.titleLarge?.color;
-    return Container(
+    return ChangeNotifierProvider.value(
+      value: gFFI.serverModel,
+      child: Container(
         width: isIncomingOnly ? 280.0 : 200.0,
         color: Theme.of(context).colorScheme.background,
         child: Stack(
@@ -147,13 +174,215 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               )
           ],
         ),
+      ),
     );
   }
 
   buildRightPane(BuildContext context) {
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: const PeerTabPage(),
+      child: ConnectionPage(),
+    );
+  }
+
+  buildIDBoard(BuildContext context) {
+    final model = gFFI.serverModel;
+    return Container(
+      margin: const EdgeInsets.only(left: 20, right: 11),
+      height: 57,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Container(
+            width: 2,
+            decoration: const BoxDecoration(color: MyTheme.accent),
+          ).marginOnly(top: 5),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 7),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    height: 25,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          translate("ID"),
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.color
+                                  ?.withOpacity(0.5)),
+                        ).marginOnly(top: 5),
+                        buildPopupMenu(context)
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: GestureDetector(
+                      onDoubleTap: () {
+                        Clipboard.setData(
+                            ClipboardData(text: model.serverId.text));
+                        showToast(translate("Copied"));
+                      },
+                      child: TextFormField(
+                        controller: model.serverId,
+                        readOnly: true,
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.only(top: 10, bottom: 10),
+                        ),
+                        style: TextStyle(
+                          fontSize: 22,
+                        ),
+                      ).workaroundFreezeLinuxMint(),
+                    ),
+                  )
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildPopupMenu(BuildContext context) {
+    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+    RxBool hover = false.obs;
+    return InkWell(
+      onTap: DesktopTabPage.onAddSetting,
+      child: Tooltip(
+        message: translate('Settings'),
+        child: Obx(
+          () => CircleAvatar(
+            radius: 15,
+            backgroundColor: hover.value
+                ? Theme.of(context).scaffoldBackgroundColor
+                : Theme.of(context).colorScheme.background,
+            child: Icon(
+              Icons.more_vert_outlined,
+              size: 20,
+              color: hover.value ? textColor : textColor?.withOpacity(0.5),
+            ),
+          ),
+        ),
+      ),
+      onHover: (value) => hover.value = value,
+    );
+  }
+
+  buildPasswordBoard(BuildContext context) {
+    return ChangeNotifierProvider.value(
+        value: gFFI.serverModel,
+        child: Consumer<ServerModel>(
+          builder: (context, model, child) {
+            return buildPasswordBoard2(context, model);
+          },
+        ));
+  }
+
+  buildPasswordBoard2(BuildContext context, ServerModel model) {
+    RxBool refreshHover = false.obs;
+    RxBool editHover = false.obs;
+    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+    final showOneTime = model.approveMode != 'click' &&
+        model.verificationMethod != kUsePermanentPassword;
+    return Container(
+      margin: EdgeInsets.only(left: 20.0, right: 16, top: 13, bottom: 13),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Container(
+            width: 2,
+            height: 52,
+            decoration: BoxDecoration(color: MyTheme.accent),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 7),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AutoSizeText(
+                    translate("One-time Password"),
+                    style: TextStyle(
+                        fontSize: 14, color: textColor?.withOpacity(0.5)),
+                    maxLines: 1,
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onDoubleTap: () {
+                            if (showOneTime) {
+                              Clipboard.setData(
+                                  ClipboardData(text: model.serverPasswd.text));
+                              showToast(translate("Copied"));
+                            }
+                          },
+                          child: TextFormField(
+                            controller: model.serverPasswd,
+                            readOnly: true,
+                            decoration: InputDecoration(
+                              border: InputBorder.none,
+                              contentPadding:
+                                  EdgeInsets.only(top: 14, bottom: 10),
+                            ),
+                            style: TextStyle(fontSize: 15),
+                          ).workaroundFreezeLinuxMint(),
+                        ),
+                      ),
+                      if (showOneTime)
+                        AnimatedRotationWidget(
+                          onPressed: () => bind.mainUpdateTemporaryPassword(),
+                          child: Tooltip(
+                            message: translate('Refresh Password'),
+                            child: Obx(() => RotatedBox(
+                                quarterTurns: 2,
+                                child: Icon(
+                                  Icons.refresh,
+                                  color: refreshHover.value
+                                      ? textColor
+                                      : Color(0xFFDDDDDD),
+                                  size: 22,
+                                ))),
+                          ),
+                          onHover: (value) => refreshHover.value = value,
+                        ).marginOnly(right: 8, top: 4),
+                      if (!bind.isDisableSettings())
+                        InkWell(
+                          child: Tooltip(
+                            message: translate('Change Password'),
+                            child: Obx(
+                              () => Icon(
+                                Icons.edit,
+                                color: editHover.value
+                                    ? textColor
+                                    : Color(0xFFDDDDDD),
+                                size: 22,
+                              ).marginOnly(right: 8, top: 4),
+                            ),
+                          ),
+                          onTap: () => DesktopSettingPage.switch2page(
+                              SettingsTabKey.safety),
+                          onHover: (value) => editHover.value = value,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -198,12 +427,54 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
-  Widget buildHelpCards() {
+  Widget buildHelpCards(String updateUrl) {
+    if (!bind.isCustomClient() &&
+        updateUrl.isNotEmpty &&
+        !isCardClosed &&
+        bind.mainUriPrefixSync().contains('rustdesk')) {
+      final isToUpdate = (isWindows || isMacOS) && bind.mainIsInstalled();
+      String btnText = isToUpdate ? 'Update' : 'Download';
+      GestureTapCallback onPressed = () async {
+        final Uri url = Uri.parse('https://rustdesk.com/download');
+        await launchUrl(url);
+      };
+      if (isToUpdate) {
+        onPressed = () {
+          handleUpdate(updateUrl);
+        };
+      }
+      return buildInstallCard(
+          "Status",
+          "${translate("new-version-of-{${bind.mainGetAppNameSync()}}-tip")} (${bind.mainGetNewVersion()}).",
+          btnText,
+          onPressed,
+          closeButton: true,
+          help: isToUpdate ? 'Changelog' : null,
+          link: isToUpdate
+              ? 'https://github.com/rustdesk/rustdesk/releases/tag/${bind.mainGetNewVersion()}'
+              : null);
+    }
     if (systemError.isNotEmpty) {
       return buildInstallCard("", systemError, "", () {});
     }
 
-    if (isMacOS) {
+    if (isWindows && !bind.isDisableInstallation()) {
+      if (!bind.mainIsInstalled()) {
+        return buildInstallCard(
+            "", bind.isOutgoingOnly() ? "" : "install_tip", "Install",
+            () async {
+          await rustDeskWinManager.closeAllSubWindows();
+          bind.mainGotoInstall();
+        });
+      } else if (bind.mainIsInstalledLowerVersion()) {
+        return buildInstallCard(
+            "Status", "Your installation is lower version.", "Click to upgrade",
+            () async {
+          await rustDeskWinManager.closeAllSubWindows();
+          bind.mainUpdateMe();
+        });
+      }
+    } else if (isMacOS) {
       final isOutgoingOnly = bind.isOutgoingOnly();
       if (!(isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false))) {
         return buildInstallCard("Permissions", "config_screen", "Configure",
@@ -429,6 +700,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   void initState() {
     super.initState();
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
+      await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();
       if (systemError != error) {
         systemError = error;
@@ -476,6 +748,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         }
       }
     });
+    Get.put<RxBool>(svcStopped, tag: 'stop-service');
     rustDeskWinManager.registerActiveWindowListener(onActiveWindowChanged);
 
     screenToMap(window_size.Screen screen) => {
@@ -509,6 +782,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
       if (call.method == kWindowMainWindowOnTop) {
         windowOnTop(null);
+      } else if (call.method == kWindowRefreshCurrentUser) {
+        gFFI.userModel.refreshCurrentUser();
       } else if (call.method == kWindowGetScreenList) {
         return jsonEncode(
             (await window_size.getScreenList()).map(screenToMap).toList());
@@ -521,8 +796,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       } else if (call.method == kWindowConnect) {
         await connectMainDesktop(
           call.arguments['id'],
+          isFileTransfer: call.arguments['isFileTransfer'],
           isViewCamera: call.arguments['isViewCamera'],
           isTerminal: call.arguments['isTerminal'],
+          isTcpTunneling: call.arguments['isTcpTunneling'],
+          isRDP: call.arguments['isRDP'],
           password: call.arguments['password'],
           forceRelay: call.arguments['forceRelay'],
           connToken: call.arguments['connToken'],
@@ -594,6 +872,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void dispose() {
     _uniLinksSubscription?.cancel();
+    Get.delete<RxBool>(tag: 'stop-service');
     _updateTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -608,3 +887,240 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 }
 
+void setPasswordDialog({VoidCallback? notEmptyCallback}) async {
+  final p0 = TextEditingController(text: "");
+  final p1 = TextEditingController(text: "");
+  var errMsg0 = "";
+  var errMsg1 = "";
+  final localPasswordSet =
+      (await bind.mainGetCommon(key: "local-permanent-password-set")) == "true";
+  final permanentPasswordSet =
+      (await bind.mainGetCommon(key: "permanent-password-set")) == "true";
+  final presetPassword = permanentPasswordSet && !localPasswordSet;
+  var canSubmit = false;
+  final RxString rxPass = "".obs;
+  final rules = [
+    DigitValidationRule(),
+    UppercaseValidationRule(),
+    LowercaseValidationRule(),
+    // SpecialCharacterValidationRule(),
+    MinCharactersValidationRule(8),
+  ];
+  final maxLength = bind.mainMaxEncryptLen();
+  final statusTip = localPasswordSet
+      ? translate('password-hidden-tip')
+      : (presetPassword ? translate('preset-password-in-use-tip') : '');
+  final showStatusTipOnMobile =
+      statusTip.isNotEmpty && !isDesktop && !isWebDesktop;
+
+  gFFI.dialogManager.show((setState, close, context) {
+    updateCanSubmit() {
+      canSubmit = p0.text.trim().isNotEmpty || p1.text.trim().isNotEmpty;
+    }
+
+    submit() async {
+      if (!canSubmit) {
+        return;
+      }
+      setState(() {
+        errMsg0 = "";
+        errMsg1 = "";
+      });
+      final pass = p0.text.trim();
+      if (pass.isNotEmpty) {
+        final Iterable violations = rules.where((r) => !r.validate(pass));
+        if (violations.isNotEmpty) {
+          setState(() {
+            errMsg0 =
+                '${translate('Prompt')}: ${violations.map((r) => r.name).join(', ')}';
+          });
+          return;
+        }
+      }
+      if (p1.text.trim() != pass) {
+        setState(() {
+          errMsg1 =
+              '${translate('Prompt')}: ${translate("The confirmation is not identical.")}';
+        });
+        return;
+      }
+      final ok = await bind.mainSetPermanentPasswordWithResult(password: pass);
+      if (!ok) {
+        setState(() {
+          errMsg0 = '${translate('Prompt')}: ${translate("Failed")}';
+        });
+        return;
+      }
+      if (pass.isNotEmpty) {
+        notEmptyCallback?.call();
+      }
+      close();
+    }
+
+    return CustomAlertDialog(
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.key, color: MyTheme.accent),
+          Text(translate("Set Password")).paddingOnly(left: 10),
+        ],
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 500),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: showStatusTipOnMobile ? 0.0 : 6.0,
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    obscureText: true,
+                    decoration: InputDecoration(
+                        labelText: translate('Password'),
+                        errorText: errMsg0.isNotEmpty ? errMsg0 : null),
+                    controller: p0,
+                    autofocus: true,
+                    onChanged: (value) {
+                      rxPass.value = value.trim();
+                      setState(() {
+                        errMsg0 = '';
+                        updateCanSubmit();
+                      });
+                    },
+                    maxLength: maxLength,
+                  ).workaroundFreezeLinuxMint(),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: PasswordStrengthIndicator(password: rxPass)),
+              ],
+            ).marginOnly(top: 2, bottom: showStatusTipOnMobile ? 2 : 8),
+            SizedBox(
+              height: showStatusTipOnMobile ? 0.0 : 8.0,
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    obscureText: true,
+                    decoration: InputDecoration(
+                        labelText: translate('Confirmation'),
+                        errorText: errMsg1.isNotEmpty ? errMsg1 : null),
+                    controller: p1,
+                    onChanged: (value) {
+                      setState(() {
+                        errMsg1 = '';
+                        updateCanSubmit();
+                      });
+                    },
+                    maxLength: maxLength,
+                  ).workaroundFreezeLinuxMint(),
+                ),
+              ],
+            ),
+            if (statusTip.isNotEmpty)
+              Row(
+                children: [
+                  Icon(Icons.info, color: Colors.amber, size: 18)
+                      .marginOnly(right: 6),
+                  Expanded(
+                      child: Text(
+                    statusTip,
+                    style: const TextStyle(fontSize: 13, height: 1.1),
+                  ))
+                ],
+              ).marginOnly(top: 6, bottom: 2),
+            SizedBox(
+              height: showStatusTipOnMobile ? 0.0 : 8.0,
+            ),
+            Obx(() => Wrap(
+                  runSpacing: showStatusTipOnMobile ? 2.0 : 8.0,
+                  spacing: 4,
+                  children: rules.map((e) {
+                    var checked = e.validate(rxPass.value.trim());
+                    return Chip(
+                        label: Text(
+                          e.name,
+                          style: TextStyle(
+                              color: checked
+                                  ? const Color(0xFF0A9471)
+                                  : Color.fromARGB(255, 198, 86, 157)),
+                        ),
+                        backgroundColor: checked
+                            ? const Color(0xFFD0F7ED)
+                            : Color.fromARGB(255, 247, 205, 232));
+                  }).toList(),
+                ))
+          ],
+        ),
+      ),
+      actions: (() {
+        final cancelButton = dialogButton(
+          "Cancel",
+          icon: Icon(Icons.close_rounded),
+          onPressed: close,
+          isOutline: true,
+        );
+        final removeButton = dialogButton(
+          "Remove",
+          icon: Icon(Icons.delete_outline_rounded),
+          onPressed: () async {
+            setState(() {
+              errMsg0 = "";
+              errMsg1 = "";
+            });
+            final ok =
+                await bind.mainSetPermanentPasswordWithResult(password: "");
+            if (!ok) {
+              setState(() {
+                errMsg0 = '${translate('Prompt')}: ${translate("Failed")}';
+              });
+              return;
+            }
+            close();
+          },
+          buttonStyle: ButtonStyle(
+              backgroundColor: MaterialStatePropertyAll(Colors.red)),
+        );
+        final okButton = dialogButton(
+          "OK",
+          icon: Icon(Icons.done_rounded),
+          onPressed: canSubmit ? submit : null,
+        );
+        if (!isDesktop && !isWebDesktop && localPasswordSet) {
+          return [
+            Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    cancelButton,
+                    const SizedBox(width: 4),
+                    removeButton,
+                    const SizedBox(width: 4),
+                    okButton,
+                  ],
+                ),
+              ),
+            ),
+          ];
+        }
+        return [
+          cancelButton,
+          if (localPasswordSet) removeButton,
+          okButton,
+        ];
+      })(),
+      onSubmit: canSubmit ? submit : null,
+      onCancel: close,
+    );
+  });
+}

@@ -6,7 +6,7 @@ use cocoa::{
     base::{id, nil, YES},
     foundation::{NSAutoreleasePool, NSString},
 };
-use objc::runtime::NO;
+use objc::runtime::{Class, NO};
 use objc::{
     class,
     declare::ClassDecl,
@@ -16,7 +16,7 @@ use objc::{
 };
 use sciter::{make_args, Host};
 
-use base::log;
+use hbb_common::log;
 
 static APP_HANDLER_IVAR: &str = "GoDeskAppHandler";
 
@@ -104,12 +104,27 @@ unsafe fn set_delegate(handler: Option<Box<dyn AppHandler>>) {
         sel!(handleMenuItem:),
         handle_menu_item as extern "C" fn(&mut Object, Sel, id),
     );
+    decl.add_method(
+        sel!(application:openURLs:),
+        handle_open_urls as extern "C" fn(&Object, Sel, id, id) -> (),
+    );
     let decl = decl.register();
     let delegate: id = msg_send![decl, alloc];
     let () = msg_send![delegate, init];
     let state = DelegateState { handler };
     let handler_ptr = Box::into_raw(Box::new(state));
     (*delegate).set_ivar(APP_HANDLER_IVAR, handler_ptr as *mut c_void);
+    // Set the url scheme handler
+    let Some(cls) = Class::get("NSAppleEventManager") else {
+        log::error!("Failed to get NSAppleEventManager");
+        return;
+    };
+    let manager: *mut Object = msg_send![cls, sharedAppleEventManager];
+    let _: () = msg_send![manager,
+                              setEventHandler: delegate
+                              andSelector: sel!(handleEvent:withReplyEvent:)
+                              forEventClass: fruitbasket::kInternetEventClass
+                              andEventID: fruitbasket::kAEGetURL];
     let () = msg_send![NSApp(), setDelegate: delegate];
 }
 
@@ -170,7 +185,35 @@ extern "C" fn handle_menu_item(this: &mut Object, _: Sel, item: id) {
     }
 }
 
+#[no_mangle]
+extern "C" fn handle_open_urls(_self: &Object, _cmd: Sel, _: id, urls: id) -> () {
+    use cocoa::foundation::NSArray;
+    use cocoa::foundation::NSURL;
+    use std::ffi::CStr;
+    unsafe {
+        for i in 0..urls.count() {
+            let theurl = CStr::from_ptr(urls.objectAtIndex(i).absoluteString().UTF8String())
+                .to_string_lossy()
+                .into_owned();
+            log::debug!("URL received: {}", theurl);
+            std::thread::spawn(move || crate::handle_url_scheme(theurl));
+        }
+    }
+}
 
+// Customize the service opening logic.
+#[no_mangle]
+fn service_should_handle_reopen(
+    _obj: &Object,
+    _sel: Sel,
+    _sender: id,
+    _has_visible_windows: BOOL,
+) -> BOOL {
+    log::debug!("Invoking the main rustdesk process");
+    std::thread::spawn(move || crate::handle_url_scheme("".to_string()));
+    // Prevent default logic.
+    NO
+}
 
 unsafe fn make_menu_item(title: &str, key: &str, tag: u32) -> *mut Object {
     let title = NSString::alloc(nil).init_str(title);
