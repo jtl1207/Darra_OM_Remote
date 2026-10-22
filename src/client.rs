@@ -1719,10 +1719,8 @@ impl LoginConfigHandler {
             msg.custom_image_quality = quality << 8;
             #[cfg(feature = "flutter")]
             if let Some(custom_fps) = self.options.get("custom-fps") {
-                let mut custom_fps = custom_fps.parse().unwrap_or(30);
-                if !allow_more && custom_fps > 30 {
-                    custom_fps = 30;
-                }
+                // 公共服务器限速策略已退役 (DURT 无托管公共服), 自定义帧率不再钳 30。
+                let custom_fps = custom_fps.parse().unwrap_or(30);
                 msg.custom_fps = custom_fps;
                 *self.custom_fps.lock().unwrap() = Some(custom_fps as _);
             }

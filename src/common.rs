@@ -952,6 +952,13 @@ pub fn get_app_name() -> String {
     hbb_common::config::APP_NAME.read().unwrap().clone()
 }
 
+/// 产品展示名 (窗口标题/文案): 固定「Darra 远程」。
+/// 不动 APP_NAME —— 它决定配置目录与 is_rustdesk() 判定, 保持数据路径稳定。
+#[inline]
+pub fn product_name() -> String {
+    "Darra 远程".to_owned()
+}
+
 #[inline]
 pub fn is_rustdesk() -> bool {
     hbb_common::config::APP_NAME.read().unwrap().eq("RustDesk")

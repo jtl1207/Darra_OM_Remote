@@ -13,6 +13,7 @@ use base::config::keys;
 use base::fs;
 use base::message_proto::*;
 use bytes::Bytes;
+use uuid::Uuid;
 use hbb_common::{
     allow_err,
     config::{Config, LocalConfig, PeerConfig},

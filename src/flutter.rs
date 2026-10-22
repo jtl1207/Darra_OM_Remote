@@ -226,7 +226,7 @@ pub unsafe extern "C" fn free_c_args(ptr: *mut *mut c_char, len: c_int) {
 #[cfg(windows)]
 #[no_mangle]
 pub unsafe extern "C" fn get_rustdesk_app_name(buffer: *mut u16, length: i32) -> i32 {
-    let name = crate::platform::wide_string(&crate::get_app_name());
+    let name = crate::platform::wide_string(&crate::product_name());
     if length > name.len() as i32 {
         std::ptr::copy_nonoverlapping(name.as_ptr(), buffer, name.len());
         return 0;
@@ -2381,7 +2381,10 @@ pub(super) mod async_tasks {
         loop {
             match rx_onlines.recv() {
                 Ok(ids) => {
-                    crate::client::peer_online::query_online_states(ids, handle_query_onlines).await
+                    // peer_online (hbbs 在线态) 已随 rendezvous 移除, 连接引擎已替换为 DURT。
+                    // 无在线态来源, 全部按离线回执, 保持 UI 回调链不悬空。
+                    hbb_common::log::debug!("peer_online 已移除, {} 个 id 按离线回执", ids.len());
+                    handle_query_onlines(vec![], ids)
                 }
                 _ => {
                     // unreachable!

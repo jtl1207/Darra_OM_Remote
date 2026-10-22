@@ -1,6 +1,7 @@
 use base::config::keys::{self, *};
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use hbb_common::password_security;
+use bytes::Bytes;
 use hbb_common::{
     allow_err,
     config::{self, Config, LocalConfig, PeerConfig},
@@ -574,6 +575,18 @@ pub fn temporary_password() -> String {
     return password_security::temporary_password();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     return TEMPORARY_PASSWD.lock().unwrap().clone();
+}
+
+/// 重新生成临时密码: 移动端本地生成; 桌面端同步缓存 (原服务侧刷新已随 rendezvous 移除)。
+#[inline]
+pub fn update_temporary_password() {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    password_security::update_temporary_password();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        hbb_common::password_security::update_temporary_password();
+        *TEMPORARY_PASSWD.lock().unwrap() = hbb_common::password_security::temporary_password();
+    }
 }
 
 #[inline]

@@ -4,6 +4,10 @@ mod download;
 use crate::common::do_check_software_update;
 use artifact::verified_update_artifact_from_release_page_url;
 pub(crate) use artifact::{current_update_arch, current_update_format, current_update_platform};
+pub use artifact::{
+    current_update_artifact_query, verified_update_artifact_for_download_url,
+    verified_update_artifact_for_release_page_url,
+};
 pub use artifact::get_update_download_file_from_url;
 use base::config::keys;
 use download::ensure_verified_update_artifact;

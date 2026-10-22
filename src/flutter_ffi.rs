@@ -985,7 +985,8 @@ pub fn main_get_login_device_info() -> SyncReturn<String> {
 }
 
 pub fn main_change_id(new_id: String) {
-    change_id(new_id)
+    // 自定义 ID 已随 hbbs/rendezvous 移除, 连接引擎已替换为 DURT, 忽略改 ID。
+    log::error!("自定义 ID 已随 hbbs 移除, 连接引擎已替换为 DURT, 忽略 change_id {new_id}");
 }
 
 pub fn main_get_async_status() -> String {
@@ -1106,11 +1107,11 @@ pub fn main_get_socks() -> Vec<String> {
 }
 
 pub fn main_get_app_name() -> String {
-    get_app_name()
+    crate::product_name()
 }
 
 pub fn main_get_app_name_sync() -> SyncReturn<String> {
-    SyncReturn(get_app_name())
+    SyncReturn(crate::product_name())
 }
 
 pub fn main_uri_prefix_sync() -> SyncReturn<String> {
@@ -1139,7 +1140,8 @@ pub fn main_get_peer_sync(id: String) -> SyncReturn<String> {
 }
 
 pub fn main_get_lan_peers() -> String {
-    serde_json::to_string(&get_lan_peers()).unwrap_or_default()
+    // 局域网发现已随 rendezvous 移除, 连接引擎已替换为 DURT, 恒返回空列表。
+    "[]".to_owned()
 }
 
 pub fn main_get_connect_status() -> String {
@@ -1163,7 +1165,8 @@ pub fn main_check_connect_status() {
 }
 
 pub fn main_is_using_public_server() -> bool {
-    crate::using_public_server()
+    // DURT 无托管公共服 (旧 rendezvous 协议层已退役)。
+    false
 }
 
 pub fn main_discover() {
@@ -1569,12 +1572,10 @@ pub fn main_load_fav_peers() {
 }
 
 pub fn main_load_lan_peers() {
+    // 局域网发现已随 rendezvous 移除, 连接引擎已替换为 DURT, 推送空列表。
     let data = HashMap::from([
         ("name", "load_lan_peers".to_owned()),
-        (
-            "peers",
-            serde_json::to_string(&get_lan_peers()).unwrap_or_default(),
-        ),
+        ("peers", "[]".to_owned()),
     ]);
     let _res = flutter::push_global_event(
         flutter::APP_TYPE_MAIN,
@@ -1641,9 +1642,10 @@ pub fn main_get_main_display() -> SyncReturn<String> {
         let is_linux_wayland = !is_x11();
 
         if !is_linux_wayland {
-            if let Ok(displays) = crate::display_service::try_get_displays() {
+            // display_service 已退役, 显示枚举直接走 scrap::Display (与抓屏同一来源)。
+            if let Ok(displays) = scrap::Display::all() {
                 // to-do: Need to detect current display index.
-                if let Some(display) = displays.iter().next() {
+                if let Some(display) = displays.first() {
                     display_info = serde_json::to_string(&HashMap::from([
                         ("w", display.width()),
                         ("h", display.height()),
@@ -1676,10 +1678,11 @@ pub fn main_get_main_display() -> SyncReturn<String> {
 pub fn main_get_displays() -> SyncReturn<String> {
     #[cfg(target_os = "ios")]
     let display_info = "".to_owned();
+    // display_service 已退役, 显示枚举直接走 scrap::Display (与抓屏同一来源)。
     #[cfg(not(target_os = "ios"))]
     let mut display_info = "".to_owned();
     #[cfg(not(target_os = "ios"))]
-    if let Ok(displays) = crate::display_service::try_get_displays() {
+    if let Ok(displays) = scrap::Display::all() {
         let displays = displays
             .iter()
             .map(|d| {
@@ -1752,7 +1755,8 @@ pub fn set_voice_call_input_device(_is_cm: bool, _device: String) {
     if _is_cm {
         let _ = crate::ipc::set_config("voice-call-input", _device);
     } else {
-        crate::audio_service::set_voice_call_input_device(Some(_device), true);
+        // 语音通话已移除 (连接引擎已替换为 DURT), 无音频输入设备可设。
+        log::debug!("语音通话已移除, 忽略 set_voice_call_input_device");
     }
 }
 
@@ -1764,7 +1768,8 @@ pub fn get_voice_call_input_device(_is_cm: bool) -> String {
             _ => "".to_owned(),
         }
     } else {
-        crate::audio_service::get_voice_call_input_device().unwrap_or_default()
+        // 语音通话已移除 (连接引擎已替换为 DURT), 无音频输入设备。
+        String::new()
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     "".to_owned()
@@ -2167,7 +2172,7 @@ pub fn main_start_service() {
 }
 
 pub fn main_update_temporary_password() {
-    update_temporary_password();
+    ui_interface::update_temporary_password();
 }
 
 pub fn main_check_super_user_permission() -> bool {
@@ -2429,23 +2434,22 @@ pub fn install_install_options() -> SyncReturn<String> {
 }
 
 pub fn main_account_auth(op: String, remember_me: bool) {
-    let id = get_id();
-    let uuid = get_uuid();
-    account_auth(op, id, uuid, remember_me);
+    // 账号体系已替换为 darra-auth 登录门 (hbbs 账号轨已随 rendezvous 移除)。
+    log::error!("hbbs 账号登录已移除, 登录门为 darra-auth, 忽略 account_auth op={op} remember_me={remember_me}");
 }
 
 pub fn main_account_auth_cancel() {
-    account_auth_cancel()
+    log::debug!("hbbs 账号登录已移除, 忽略 account_auth_cancel");
 }
 
 pub fn main_account_auth_result() -> String {
-    account_auth_result()
+    // 恒返回未登录, Dart 侧由 OmAuth.loginState 驱动登录门。
+    "not logged in".to_owned()
 }
 
 pub fn main_on_main_window_close() {
     // may called more than one times
-    #[cfg(windows)]
-    crate::portable_service::client::drop_portable_service_shared_memory();
+    // portable_service (便携服务共享内存) 已随旧服务栈移除, 连接引擎已替换为 DURT。
 }
 
 pub fn main_current_is_wayland() -> SyncReturn<bool> {

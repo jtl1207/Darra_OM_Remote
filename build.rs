@@ -4,6 +4,8 @@ fn build_windows() {
     let file2 = "src/platform/windows_delete_test_cert.cc";
     cc::Build::new().file(file).file(file2).compile("windows");
     println!("cargo:rustc-link-lib=WtsApi32");
+    // hwcodec 的 id3v2.o 直接引用 zlib uncompress; vcpkg x64-windows-static 的静态 zlib 产物名为 zs.lib。
+    println!("cargo:rustc-link-lib=static=zs");
     println!("cargo:rerun-if-changed={}", file);
     println!("cargo:rerun-if-changed={}", file2);
 }
