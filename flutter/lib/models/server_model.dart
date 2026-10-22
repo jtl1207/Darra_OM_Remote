@@ -32,7 +32,7 @@ class ServerModel with ChangeNotifier {
   bool _clipboardOk = false;
   bool _showElevation = false;
   bool hideCm = false;
-  int _connectStatus = 0; // Rendezvous Server status
+  int _connectStatus = 0; // 服务端连接状态
   String _verificationMethod = "";
   String _temporaryPasswordLength = "";
   bool _allowNumericOneTimePassword = false;

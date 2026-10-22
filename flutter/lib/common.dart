@@ -2967,7 +2967,7 @@ class ServerConfig {
 
   /// from local options
   ServerConfig.fromOptions(Map<String, dynamic> options)
-      : idServer = options['custom-rendezvous-server'] ?? "",
+      : idServer = "", // 旧 ID 服务器 option 已退役, 无本地来源
         relayServer = options['relay-server'] ?? "",
         apiServer = options['api-server'] ?? "",
         key = options['key'] ?? "";
@@ -3628,8 +3628,7 @@ Future<bool> setServerConfig(
   final oldApiServer = await bind.mainGetApiServer();
 
   // should set one by one
-  await bind.mainSetOption(
-      key: 'custom-rendezvous-server', value: config.idServer);
+  // idServer 对应的旧 option 已退役, 不再写入
   await bind.mainSetOption(key: 'relay-server', value: config.relayServer);
   await bind.mainSetOption(key: 'api-server', value: config.apiServer);
   await bind.mainSetOption(key: 'key', value: config.key);
